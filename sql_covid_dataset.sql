@@ -120,8 +120,8 @@ FROM pop_vs_vac
 
 -- Q7: Total Population VS Total Vaccination
 -- using temp table
-DROP TABLE IF EXISTS percent_population_vaccinated
-CREATE TABLE percent_population_vaccinated 
+DROP TABLE IF EXISTS #percent_population_vaccinated
+CREATE TABLE #percent_population_vaccinated 
 (
 	continent NVARCHAR(255)
 	,location NVARCHAR(255)
@@ -131,7 +131,7 @@ CREATE TABLE percent_population_vaccinated
 	,cumulative_vaccinations FLOAT
 )
 
-INSERT INTO percent_population_vaccinated 
+INSERT INTO #percent_population_vaccinated 
 SELECT 
 	dea.continent
 	,dea.location
@@ -148,7 +148,7 @@ WHERE dea.continent IS NOT NULL
 SELECT 
 	*
 	,ROUND((cumulative_vaccinations/population) * 100, 4) AS cumulative_percentage
-FROM percent_population_vaccinated
+FROM #percent_population_vaccinated
 
 
 -- Q8: Create view for data viz
