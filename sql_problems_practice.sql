@@ -117,3 +117,115 @@ select
       rows between 2 preceding and current row), 2) as rolling_avg_3d
 from tweets
 
+/* 08
+The Bloomberg terminal is the go-to resource for financial professionals, offering convenient access to a wide array of financial datasets. 
+As a Data Analyst at Bloomberg, you have access to historical data on stock performance.
+
+Currently, you're analyzing the highest and lowest open prices for each FAANG stock by month over the years.
+
+For each FAANG stock, display the ticker symbol, the month and year ('Mon-YYYY') with the corresponding highest and lowest open prices (refer to the Example Output format). 
+Ensure that the results are sorted by ticker symbol.
+*/
+
+with ranked_open_price as(
+select 
+  TO_CHAR(date, 'Mon-YYYY') AS month_year,
+  ticker,
+  open,
+  row_number() over(PARTITION by ticker order by open asc) as rnk_open_lowest,
+  row_number() over(PARTITION by ticker order by open desc) as rnk_open_highest
+from stock_prices)
+
+select 
+  ticker,
+  max(month_year) filter (where rnk_open_highest = 1) as highest_mth,
+  max(open) filter (where rnk_open_highest = 1) as highest_open,
+  max(month_year) filter (where rnk_open_lowest = 1) as lowest_mth,
+  max(open) filter (where rnk_open_lowest = 1) as lowest_open
+from ranked_open_price
+group by ticker
+order by ticker
+
+
+
+/* 09
+In an effort to identify high-value customers, Amazon asked for your help to obtain data about users who go on shopping sprees. 
+A shopping spree occurs when a user makes purchases on 3 or more consecutive days.
+
+List the user IDs who have gone on at least 1 shopping spree in ascending order.
+*/
+
+SELECT 
+  distinct T1.user_id
+FROM transactions AS T1
+INNER JOIN transactions AS T2
+  ON DATE(T2.transaction_date) = DATE(T1.transaction_date) + 1
+INNER JOIN transactions AS T3
+  ON DATE(T3.transaction_date) = DATE(T1.transaction_date) + 2
+WHERE t1.user_id = t2.user_id and t2.user_id = t3.user_id
+order by T1.user_id
+
+
+
+/* 10
+Assume you're given a table on Walmart user transactions. Based on their most recent transaction date, write a query that retrieve the users along with the number of products they bought.
+
+Output the user's most recent transaction date, user ID, and the number of products, sorted in chronological order by the transaction date.
+*/
+
+with ranked_date as(
+select 
+  user_id,
+  transaction_date,
+  count(product_id) as purchase_count,
+  rank() over(PARTITION by user_id order by transaction_date desc) as rank_date
+from user_transactions
+group by user_id, transaction_date
+order by user_id)
+
+select 
+  transaction_date,
+  user_id,
+  purchase_count
+from ranked_date
+where rank_date = 1
+order by transaction_date
+
+
+/* 11
+You're given a table containing the item count for each order on Alibaba, along with the frequency of orders that have the same item count. 
+Write a query to retrieve the mode of the order occurrences. 
+Additionally, if there are multiple item counts with the same mode, the results should be sorted in ascending order.
+*/ 
+
+with ranked_oo as (
+select 
+  item_count,
+  order_occurrences,
+  dense_rank() over(order by order_occurrences desc) as ranked_order_occurrences
+from items_per_order)
+
+select 
+  item_count as mode
+from ranked_oo
+where ranked_order_occurrences = 1
+order by item_count
+
+
+/* 12
+Your team at JPMorgan Chase is soon launching a new credit card. You are asked to estimate how many cards you'll issue in the first month.
+
+Before you can answer this question, you want to first get some perspective on how well new credit card launches typically do in their first month.
+
+Write a query that outputs the name of the credit card, and how many cards were issued in its launch month. 
+The launch month is the earliest record in the monthly_cards_issued table for a given card. Order the results starting from the biggest issued amount.
+*/
+
+
+SELECT DISTINCT
+  card_name,
+  FIRST_VALUE(issued_amount) OVER(PARTITION BY card_name ORDER BY issue_year, issue_month)
+  AS issued_amount
+FROM monthly_cards_issued
+ORDER BY issued_amount DESC
+
