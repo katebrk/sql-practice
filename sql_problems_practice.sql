@@ -222,10 +222,119 @@ The launch month is the earliest record in the monthly_cards_issued table for a 
 */
 
 
-SELECT DISTINCT
-  card_name,
-  FIRST_VALUE(issued_amount) OVER(PARTITION BY card_name ORDER BY issue_year, issue_month)
-  AS issued_amount
+SELECT 
+  DISTINCT card_name,
+  FIRST_VALUE(issued_amount) OVER(PARTITION BY card_name ORDER BY issue_year, issue_month) AS issued_amount
 FROM monthly_cards_issued
 ORDER BY issued_amount DESC
+
+
+/* 13
+A phone call is considered an international call when the person calling is in a different country than the person receiving the call.
+
+What percentage of phone calls are international? Round the result to 1 decimal.
+
+Assumption: The caller_id in phone_info table refers to both the caller and receiver.
+*/
+
+with table1 as(
+select 
+  c.caller_id,
+  c.receiver_id,
+  i1.country_id as caller_country,
+  i2.country_id as receiver_country
+from phone_calls as c
+left join phone_info as i1 on c.caller_id = i1.caller_id
+left join phone_info as i2 on c.receiver_id = i2.caller_id)
+
+select 
+  round(100.0 * sum(case when caller_country != receiver_country then 1 else 0 end) 
+  / count(*), 1) as international_calls_pct
+from table1
+
+
+/* 14
+UnitedHealth Group (UHG) has a program called Advocate4Me, which allows policy holders (or, members) to call an advocate and receive support for their health care needs – whether that's claims and benefits support, drug coverage, pre- and post-authorisation, medical records, emergency assistance, or member portal services.
+
+Calls to the Advocate4Me call centre are classified into various categories, but some calls cannot be neatly categorised. These uncategorised calls are labeled as “n/a”, or are left empty when the support agent does not enter anything into the call category field.
+
+Write a query to calculate the percentage of calls that cannot be categorised. Round your answer to 1 decimal place. For example, 45.0, 48.5, 57.7.
+*/ 
+
+select 
+  round(100.0 * count(distinct case_id) filter (where call_category = 'n/a' or call_category is null) 
+  / count(distinct case_id), 1) as uncategorised_call_pct
+from callers
+
+
+/* 15
+Assume you're given a table containing information on Facebook user actions. Write a query to obtain number of monthly active users (MAUs) in July 2022, including the month in numerical format "1, 2, 3".
+
+Hint: An active user is defined as a user who has performed actions such as 'sign-in', 'like', or 'comment' in both the current month and the previous month.
+*/
+
+SELECT 
+  EXTRACT(MONTH FROM event_date) AS MONTH, 
+  COUNT(DISTINCT user_id) AS monthly_active_users
+FROM user_actions
+WHERE 
+  EXTRACT(MONTH FROM event_date) = 7
+  AND user_id IN (SELECT user_id FROM user_actions WHERE EXTRACT(MONTH FROM event_date) = 6)
+GROUP BY MONTH
+
+
+/* 16
+Assume you're given a table containing information about Wayfair user transactions for different products. Write a query to calculate the year-on-year growth rate for the total spend of each product, grouping the results by product ID.
+
+The output should include the year in ascending order, product ID, current year's spend, previous year's spend and year-on-year growth percentage, rounded to 2 decimal places.
+*/ 
+
+with agg_spend as (
+select 
+  extract(year from transaction_date) as year,
+  product_id,
+  sum(spend) as spend
+from user_transactions
+group by extract(year from transaction_date), product_id
+order by year, product_id)
+
+, yoy_spend as(
+select 
+  year,
+  product_id,
+  spend as curr_year_spend,
+  lag(spend, 1) over(PARTITION by product_id order by year) as prev_year_spend
+from agg_spend)
+
+select 
+  *,
+  round(100.0*(curr_year_spend-prev_year_spend) / prev_year_spend,2) as yoy_rate
+from yoy_spend
+
+
+/* 17
+You're provided with two tables: the advertiser table contains information about advertisers and their respective payment status, and the daily_pay table contains the current payment information for advertisers, and it only includes advertisers who have made payments.
+
+Write a query to update the payment status of Facebook advertisers based on the information in the daily_pay table. The output should include the user ID and their current payment status, sorted by the user id.
+
+The payment status of advertisers can be classified into the following categories:
+
+New: Advertisers who are newly registered and have made their first payment.
+Existing: Advertisers who have made payments in the past and have recently made a current payment.
+Churn: Advertisers who have made payments in the past but have not made any recent payment.
+Resurrect: Advertisers who have not made a recent payment but may have made a previous payment and have made a payment again recently.
+*/
+
+select 
+  COALESCE(a.user_id, p.user_id),
+  --a.status as current_status,
+  --paid,
+  case 
+    when paid is NULL then 'CHURN'
+    when paid is not null and a.status is null then 'NEW'
+    when (paid is not null and a.status IN ('CHURN')) then 'RESURRECT'
+    else 'EXISTING' end as new_status
+from advertiser as a
+full join daily_pay as p on a.user_id = p.user_id
+order by COALESCE(a.user_id, p.user_id)
 
