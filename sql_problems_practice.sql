@@ -338,3 +338,272 @@ from advertiser as a
 full join daily_pay as p on a.user_id = p.user_id
 order by COALESCE(a.user_id, p.user_id)
 
+
+/* 18
+You’re a consultant for a major pizza chain that will be running a promotion where all 3-topping pizzas will be sold for a fixed price, and are trying to understand the costs involved.
+
+Given a list of pizza toppings, consider all the possible 3-topping pizzas, and print out the total cost of those 3 toppings. Sort the results with the highest total cost on the top followed by pizza toppings in ascending order.
+
+Break ties by listing the ingredients in alphabetical order, starting from the first ingredient, followed by the second and third.
+
+P.S. Be careful with the spacing (or lack of) between each ingredient. Refer to our Example Output.
+
+Notes:
+Do not display pizzas where a topping is repeated. For example, ‘Pepperoni,Pepperoni,Onion Pizza’.
+Ingredients must be listed in alphabetical order. For example, 'Chicken,Onions,Sausage'. 'Onion,Sausage,Chicken' is not acceptable.
+*/ 
+
+SELECT 
+  concat(p1.topping_name, ',', p2.topping_name, ',', p3.topping_name) as pizza,
+  p1.ingredient_cost + p2.ingredient_cost + p3.ingredient_cost as total_cost
+FROM pizza_toppings AS p1
+CROSS JOIN
+  pizza_toppings AS p2,
+  pizza_toppings AS p3
+where p1.topping_name < p2.topping_name
+  and p2.topping_name < p3.topping_name
+order by total_cost desc, pizza
+
+
+/* 19
+You work as a data analyst for a FAANG company that tracks employee salaries over time. The company wants to understand how the average salary in each department compares to the company's overall average salary each month.
+
+Write a query to compare the average salary of employees in each department to the company's average salary for March 2024. Return the comparison result as 'higher', 'lower', or 'same' for each department. Display the department ID, payment month (in MM-YYYY format), and the comparison result.
+*/
+
+with avg_salary as(
+select 
+  payment_date,
+  avg(amount) as avg_salary
+from salary as s
+where payment_date = '03/31/2024'
+group by payment_date)
+
+, dept_avg_salary as(
+select 
+  e.department_id,
+  s.payment_date,
+  avg(s.amount) as dept_avg_salary
+from salary as s
+inner join employee as e
+on s.employee_id = e.employee_id
+where payment_date = '03/31/2024'
+group by e.department_id, s.payment_date)
+
+select 
+  ds.department_id,
+  TO_CHAR(ds.payment_date, 'MM-YYYY') as payment_date,
+  case 
+    when dept_avg_salary < avg_salary then 'lower'
+    when dept_avg_salary = avg_salary then 'same'
+    else 'higher' end as comparison
+from dept_avg_salary as ds
+inner join avg_salary as s
+on ds.payment_date = s.payment_date
+
+
+/* 20
+Sometimes, payment transactions are repeated by accident; it could be due to user error, API failure or a retry error that causes a credit card to be charged twice.
+
+Using the transactions table, identify any payments made at the same merchant with the same credit card for the same amount within 10 minutes of each other. Count such repeated payments.
+
+Assumptions: The first transaction of such payments should not be counted as a repeated payment. This means, if there are two transactions performed by a merchant with the same credit card and for the same amount within 10 minutes, there will only be 1 repeated payment.
+*/ 
+
+with transactions as (
+select 
+  transaction_id,
+  merchant_id,
+  credit_card_id,
+  transaction_timestamp,
+  lag(transaction_timestamp) over(PARTITION by merchant_id, credit_card_id, amount order by transaction_timestamp) as prev_transaction
+from transactions)
+
+, transactions_diff as (
+select
+  *,
+  round(extract(epoch from (transaction_timestamp - prev_transaction)) / 60, 1) as min_difference
+from transactions)
+
+select 
+  count(DISTINCT transaction_id) as payment_count
+from transactions_diff
+where min_difference <= 10
+
+
+/* 21
+Amazon Web Services (AWS) is powered by fleets of servers. Senior management has requested data-driven solutions to optimize server usage.
+
+Write a query that calculates the total time that the fleet of servers was running. The output should be in units of full days.
+
+Assumptions: 
+Each server might start and stop several times. 
+The total time in which the server fleet is running can be calculated as the sum of each server's uptime.
+*/ 
+with server_times as(
+select *,
+  lag(status_time) over(partition by server_id order by status_time) as prev_status_time
+from server_utilization
+order by 1)
+
+, server_times_diff as(
+select 
+  server_id,
+  --session_status,
+  prev_status_time as start_time,
+  status_time as stop_time,
+  extract(epoch from(status_time - prev_status_time)) / 86400 as diff_in_days
+from server_times
+where session_status = 'stop')
+
+select 
+  trunc(sum(diff_in_days)) as total_uptime_days
+from server_times_diff
+
+
+
+/* 22 
+For each signup source, find top 3 users in 2023 by their total subscription revenue. 
+If multiple users have the same total revenue, rank them by their signup_date. 
+
+Tables: 
+
+users
+user_id | signup_date | signup_source | plan_type
+―――――――――――――――――――――――――――――――――――――――――――――――――
+1		| 2023-01-01  | referral      | basic
+
+subscriptions
+subscription_id | user_id | start_date | end_date   | monthly_fee
+―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+101				| 1		  | 2023-01-15 | 2023-04-01 | 25.00
+
+*/ 
+--1st
+WITH users_revenue AS(
+SELECT *
+	user_id,
+	SUM(
+		(MONTH(LEAST(COALESCE(end_date, '2100-01-01'::date), '2023-12-01'::DATE)) - 
+		MONTH(GREATEST(start_date, '2023-01-01'::DATE)) + 1
+		) * monthly_fee as revenue
+from subscriptions 
+group by user_id)
+, ranked_users as(
+select 
+	r.user_id,
+	u.signup_source,
+	r.revenue,
+	row_number() over(partition by u.signup_source order by r.revenue desc, signup_date) as user_rnk
+from users_revenue as r 
+inner join users as u on r.user_id = u.user_id)
+
+select 
+	signup_source,
+	user_id
+from ranked_users
+where user_rnk <= 3
+
+
+----2nd 
+with subs as(
+select 
+	subscription_id,
+	user_id,
+	start_date,
+	end_date,
+	monthly_fee,
+	case when start_date < '2023-01-01' and (end_date is NULL or end_date > '2023-01-01') then start_date = '2023-01-01'
+		else start_date 
+		end as start_date_new,
+	case when end_date is NULL or end_date > '2023-12-01' then '2023-12-01'
+		else end_date
+		end as end_date_new
+from subscriptions as s)
+, revenues as(
+select 
+	subscription_id,
+	user_id,
+	start_date_new,
+	end_date_new, 
+	end_date_new - start_date_new as month_diff,
+	monthly_fee * (end_date_new - start_date_new) as total_revenue
+from subs
+where extract(year from start_date_new = 2023)
+	and extract(year from end_date_new = 2023))
+, ranked_users as(
+select 
+	u.signup_source,
+	u.signup_date,
+	r.total_revenue,
+	row_number(u.user_id) over(partition by u.signup_source order by r.total_revenue desc) as user_rnk 
+from revenues as r
+inner join users as u on r.user_id = u.user_id)
+
+select 
+	u.signup_source,
+	r.total_revenue
+from ranked_users
+where user_rnk <= 3
+order by r.total_revenue desc, signup_date
+
+
+/* 23 
+Calculate monthly retention rate for each plan type for each month in 2023. 
+Retention rate is defined as % of customers who were active in previous month and are still active in the current month. 
+Assume a customer is active if they have made at least one transaction in a month. 
+
+Tables:
+customers
+customer_id | created_at | churn_date | plan_type
+――――――――――――――――――――――――――――――――――――――――――――――――――
+1 			| 2023-01-15 | NULL 	  | basic
+2 			| 2023-02-10 | 2023-05-20 | premium
+
+transactions
+transaction_id | customer_id | amount | transaction_date
+――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+1001		   | 1		     | 50.00  | 2023-02-15
+
+*/ 
+
+--First, join both tables and show only customer_id, plan_type, and month of each transaction
+with transactions_month as(
+select 
+	customer_id,
+	plan_type,
+	extract(month from transaction_date) as transaction_month
+from transactions as t 
+inner join customers as c on t.customer_id=t.customer_id
+where extract(year from transaction_date) = 2023)
+
+-- Show previous activity month 
+, previous_month as(
+select 
+	customer_id,
+	plan_type,
+	transaction_month as curr_transaction_month,
+	lag(transaction_month) over(partition by customer_id, plan_type order by transaction_month) as prev_active_month
+from transactions_month)
+
+--show active customers for current and previous Mmonths by plan_type and transaction_month
+, retention_per_month as(
+select 
+	plan_type,
+	transaction_month,
+	count(distinct customer_id) as active_customers,
+	count(case when prev_active_month is not null 
+		and (curr_transaction_month-prev_active_month=1) then customer_id end) as prev_active_customers
+from previous_month
+group by plan_type, transaction_month)
+
+--calculate retention 
+select 
+	plan_type,
+	transaction_month,
+	case 
+		when prev_active_customers<>0 then (active_customers/prev_active_customers)*100.0
+		else 0
+	end as retention_perc
+from retention_per_month
+order by plan_type, transaction_month
