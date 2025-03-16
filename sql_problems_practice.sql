@@ -607,3 +607,100 @@ select
 	end as retention_perc
 from retention_per_month
 order by plan_type, transaction_month
+
+
+/* 24
+Given a table containing information about bank deposits and withdrawals made using Paypal, 
+write a query to retrieve the final account balance for each account, taking into account all the transactions 
+recorded in the table with the assumption that there are no missing transactions.
+
+transaction_id | account_id | amount | transaction_type
+――――――――――――――――――――――――――――――――――――――――――――――――――
+123 		   | 101        | 10.00  | Deposit
+124	           | 101        | 20.00  | Withdrawal
+*/ 
+
+select 
+  account_id,
+  sum(case 
+    when transaction_type = 'Withdrawal' then amount * (-1)
+    else amount
+  end) as final_balance
+from transactions
+group by account_id
+order by account_id
+
+
+/* 25
+Company provides a range of tax filing products, including TurboTax and QuickBooks, available in various versions.
+Write a query to determine the total number of tax filings made using TurboTax and QuickBooks. Each user can file taxes once a year using only one product.
+*/ 
+
+select 
+  sum(case when product ilike 'TurboTax%' then 1 else 0 end) as turbotax_total,
+  sum(case when product ilike 'QuickBooks%' then 1 else 0 end) as quickbooks_total
+from filed_taxes
+
+
+/* 26
+Identify Subject Matter Experts (SMEs) based on their work experience in specific domains. 
+An employee qualifies as an SME if they meet either of the following criteria:
+- They have 8 or more years of work experience in a single domain.
+- They have 12 or more years of work experience across two different domains.
+Write a query to return the employee IDs of all the SMEs.
+*/ 
+select employee_id
+from employee_expertise
+group by employee_id
+having (count(distinct domain) = 1 and sum(years_of_experience) >= 8)
+  or (count(distinct domain) = 2 and sum(years_of_experience) >= 12)
+
+
+/* 27
+You observe that the category column in products table contains null values. 
+Write a query that returns the updated product table with all the category values filled in, 
+taking into consideration the assumption that the first product in each category will always have a defined category value.
+
+Assumptions:
+- Each category is expected to be listed only once in the column and products within 
+the same category should be grouped together based on sequential product IDs.
+- The first product in each category will always have a defined category value.
+	- For instance, the category for product ID 1 is 'Shoes', then the subsequent product IDs 2 and 3 will be categorised as 'Shoes'.
+	- Similarly, product ID 4 is 'Jeans', then the following product ID 5 is categorised as 'Jeans' category, and so forth.
+	
+product_id | category | name 
+――――――――――――――――――――――――――――――
+1 		   | Shoes    | Adidas
+2	       | NULL     | Vans
+3 		   | Jeans    | Levi
+4	       | NULL     | Gloria Jeans
+
+*/
+--1st solution using FIRST_VALUE
+with categories as(
+select 
+  *,
+  count(category) over (order by product_id) as numbered_category --count of categories by each row 
+from products)
+
+select 
+  product_id,
+  first_value(category) over(partition by numbered_category) as category, 
+  name
+from categories
+
+--2nd solution using COALESCE
+WITH filled_category AS (
+SELECT
+  *,
+  COUNT(category) OVER (ORDER BY product_id) AS numbered_category
+FROM products
+)
+
+SELECT
+  product_id,
+  COALESCE(
+    category, 
+    MAX(category) OVER (PARTITION BY numbered_category)) AS category,
+  name
+FROM filled_category
