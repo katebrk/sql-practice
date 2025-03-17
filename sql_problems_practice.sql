@@ -704,3 +704,206 @@ SELECT
     MAX(category) OVER (PARTITION BY numbered_category)) AS category,
   name
 FROM filled_category
+
+
+/* 28 
+Microsoft Azure's capacity planning team wants to understand how much data its customers are using, 
+and how much spare capacity is left in each of its data centers. 
+You’re given three tables: customers, data centers, and forecasted_demand.
+Write a query to find each data centre’s total unused server capacity. Output the data center id in ascending order and the total spare capacity.
+
+Definitions:
+- monthly_capacity is the total monthly server capacity for each centers.
+- monthly_demand is the server demand for each customer.
+*/ 
+
+--1st 
+with servers_demand as(
+select 
+  datacenter_id,
+  sum(monthly_demand) as monthly_demand
+from forecasted_demand
+group by datacenter_id)
+
+select 
+  dc.datacenter_id,
+  dc.monthly_capacity - sd.monthly_demand as spare_capacity
+from datacenters  as dc
+inner join servers_demand as sd on dc.datacenter_id=sd.datacenter_id
+order by dc.datacenter_id
+
+--2nd 
+SELECT 
+  centers.datacenter_id, 
+  centers.monthly_capacity - SUM(demands.monthly_demand) AS spare_capacity
+FROM forecasted_demand AS demands
+INNER JOIN datacenters AS centers
+  ON demands.datacenter_id = centers.datacenter_id
+GROUP BY centers.datacenter_id, centers.monthly_capacity
+ORDER BY centers.datacenter_id
+
+
+/* 29
+Assume you are given the table below containing information on user reviews. Write a query to obtain the number and percentage of businesses that are top rated. 
+A top-rated busines is defined as one whose reviews contain only 4 or 5 stars.
+Output the number of businesses and percentage of top rated businesses rounded to the nearest integer.
+
+Assumption:
+Each business has only one review (which is the business' average rating).
+*/
+
+--1st
+SELECT 
+  COUNT(business_id) AS business_count,
+  ROUND(100.0 * COUNT(business_id)/
+    (SELECT COUNT (business_id) FROM reviews),0) AS top_rated_pct
+FROM reviews
+WHERE review_stars IN (4, 5);
+
+--2nd
+select 
+  count(distinct business_id) filter(where review_stars IN (4,5)) as business_count,
+  100 * count(distinct business_id) filter(where review_stars IN (4,5)) 
+    / count(distinct business_id) as top_rated_pct
+from reviews
+
+--3rd
+SELECT 
+	sum(case when review_stars = 4 or review_stars=5 then 1 else 0 end) as business_count,
+	(sum(case when review_stars = 4 or review_stars= 5 then 1 else 0 end) 
+		/ count(*):: float) * 100 as top_rated_pct
+FROM reviews
+
+
+/* 30
+Google marketing managers are analyzing the performance of various advertising accounts over the last month. 
+They need your help to gather the relevant data.
+Write a query to calculate the return on ad spend (ROAS) for each advertiser across all ad campaigns. 
+Round your answer to 2 decimal places, and order your output by the advertiser_id.
+
+Hint: ROAS = Ad Revenue / Ad Spend
+*/
+
+select 
+  advertiser_id,
+  round(((sum(revenue)/sum(spend))::decimal),2) as ROAS --PostgreSQL requires the input to the ROUND function to be a numeric(=decimal) data type >> need to convert roas from double precision to a decimal type before rounding
+from ad_campaigns
+group by advertiser_id
+order by advertiser_id
+
+
+/* 31
+You're given two tables containing data on Spotify users' streaming activity: songs_history which has historical streaming data, 
+and songs_weekly which has data from the current week.
+
+Write a query that outputs the user ID, song ID, and cumulative count of song plays up to August 4th, 2022, sorted in descending order.
+
+Assume that there may be new users or songs in the songs_weekly table that are not present in the songs_history table.
+
+Definitions:
+-song_weeklytable only contains data for the week of August 1st to August 7th, 2022.
+-songs_history table contains data up to July 31st, 2022. The query should include historical data from this table.
+*/ 
+
+--1st
+with songs_history_last_week as(
+select 
+  user_id,
+  song_id,
+  count(listen_time) as song_plays
+from songs_weekly
+where listen_time < '2022-08-05'
+group by user_id, song_id)
+
+select
+  COALESCE(h.user_id, h_lw.user_id) as user_id,
+  COALESCE(h.song_id, h_lw.song_id) as song_id,
+  COALESCE(h.song_plays,0) + COALESCE(h_lw.song_plays,0) as song_plays 
+from songs_history as h
+full join songs_history_last_week as h_lw 
+  on h.user_id=h_lw.user_id 
+    and h.song_id=h_lw.song_id
+order by song_plays desc
+
+--2nd 
+WITH history AS (
+  SELECT 
+    user_id, 
+    song_id, 
+    song_plays
+  FROM songs_history
+
+  UNION ALL
+
+  SELECT 
+    user_id, 
+    song_id, 
+    COUNT(song_id) AS song_plays
+  FROM songs_weekly
+  WHERE listen_time <= '08/04/2022 23:59:59'
+  GROUP BY user_id, song_id
+)
+
+SELECT 
+  user_id, 
+  song_id, 
+  SUM(song_plays) AS song_count
+FROM history
+GROUP BY 
+  user_id, 
+  song_id
+ORDER BY song_count DESC
+
+
+/* 32
+Your team at Accenture is helping a Fortune 500 client revamp their compensation and benefits program. 
+The first step in this analysis is to manually review employees who are potentially overpaid or underpaid.
+
+An employee is considered to be potentially overpaid if they earn more than 2 times the average salary for people with the same title. 
+Similarly, an employee might be underpaid if they earn less than half of the average for their title. 
+We'll refer to employees who are both underpaid and overpaid as compensation outliers for the purposes of this problem.
+
+Write a query that shows the following data for each compensation outlier: employee ID, salary, 
+and whether they are potentially overpaid or potentially underpaid
+*/ 
+
+--1st
+with avg_salaries as(
+select 
+  *,
+  round(avg(salary) over(PARTITION by title),0) as avg_title_salary
+from employee_pay)
+, salaries_status as(
+select 
+  employee_id,
+  salary,
+  case when salary / avg_title_salary >= 2 then 'Overpaid'
+    when salary / avg_title_salary <= 0.5 then 'Underpaid'
+    when salary / avg_title_salary between 0.5 and 2 then NULL
+  end as status
+from avg_salaries)
+
+select *
+from salaries_status
+where status is not null
+order by employee_id
+
+--2nd
+WITH payout AS (
+SELECT
+  employee_id,
+  salary,
+  title,
+  (AVG(salary) OVER (PARTITION BY title)) * 2 AS double_average,
+  (AVG(salary) OVER (PARTITION BY title)) / 2 AS half_average
+FROM employee_pay)
+
+SELECT
+  employee_id,
+  salary,
+  CASE WHEN salary > double_average THEN 'Overpaid'
+    WHEN salary < half_average THEN 'Underpaid'
+  END AS outlier_status
+FROM payout
+WHERE salary > double_average
+  OR salary < half_average
