@@ -907,3 +907,134 @@ SELECT
 FROM payout
 WHERE salary > double_average
   OR salary < half_average
+  
+  
+ /* 33
+ The Airbnb marketing analytics team is trying to understand what are the most common marketing channels 
+ that lead users to book their first rental on Airbnb.
+
+Write a query to find the top marketing channel and percentage of first rental bookings from the aforementioned marketing channel. 
+Round the percentage to the closest integer. Assume there are no ties.
+
+Assumptions:
+-Marketing channel with null values should be incorporated in the percentage of first bookings calculation, but the top channel should not be a null value. Meaning, we cannot have null as the top marketing channel.
+-To avoid integer division, multiple the percentage with 100.0 and not 100.
+ */
+ 
+ with bookings_rnk as (
+select 
+  b.booking_id,
+  channel,
+  row_number() over(partition by user_id order by booking_date) as order_number
+from bookings as b
+inner join booking_attribution as ba 
+  on b.booking_id=ba.booking_id)
+  
+select 
+  channel,
+  round(100 * count(*) / sum(count(*)) over(),0) as first_booking_pct
+from bookings_rnk
+where order_number=1
+group by channel
+order by count(*) desc
+limit 1
+
+
+/* 34
+As a data analyst at Uber, it's your job to report the latest metrics for specific groups of Uber users. 
+Some riders create their Uber account the same day they book their first ride; the rider engagement team calls them "in-the-moment" users.
+
+Uber wants to know the average delay between the day of user sign-up and the day of their 2nd ride. 
+Write a query to pull the average 2nd ride delay for "in-the-moment" Uber users. Round the answer to 2-decimal places.
+*/
+
+--1st 
+with in_the_moment_users as (
+select 
+  distinct u.user_id,
+  r.ride_date
+from users as u 
+inner join rides as r 
+  on u.user_id=r.user_id
+  and u.registration_date=r.ride_date)
+  
+, rides_ranked as(
+select 
+  *,
+  row_number() over(PARTITION by user_id order by ride_date) as ride_rank
+from rides)
+
+select 
+  round(1.0*sum(s.ride_date::date - ft.ride_date::date) / count(*), 2) as average_delay
+from rides_ranked as s
+inner join in_the_moment_users as ft on s.user_id=ft.user_id
+where ride_rank=2
+
+--2nd
+WITH CTE AS (
+SELECT u.user_id
+	,u.registration_date
+    ,r.ride_date
+    ,ROW_NUMBER() OVER (PARTITION BY u.user_id ORDER BY r.ride_date) AS ride_number
+FROM users u   
+JOIN rides r ON u.user_id = r.user_id)
+
+SELECT 
+	ROUND(AVG(ride_date-registration_date),2) AS average_delay
+FROM CTE 
+WHERE user_id IN (SELECT user_id FROM CTE WHERE registration_date = ride_date)
+     AND ride_number = 2
+	 
+/* 35
+As a Data Analyst on the Google Maps User Generated Content team, you and your Product Manager are investigating u
+ser-generated content (UGC) – photos and reviews that independent users upload to Google Maps.
+
+Write a query to determine which type of place (place_category) attracts the most UGC tagged as 
+"off-topic". In the case of a tie, show the output in ascending order of place_category.
+
+Assumptions:
+-Some places may not have any tags.
+-Each UGC upload with the "off-topic" tag will be counted separately.
+*/
+
+--1st
+with mentions as(
+select 
+  place_category,
+  count(r.content_tag) as count_mentioned
+from maps_ugc_review as r 
+inner join place_info as i on r.place_id=i.place_id
+where lower(r.content_tag) = 'off-topic'
+group by place_category
+order by count(r.content_tag) desc, place_category)
+
+select
+  place_category
+from mentions
+where count_mentioned = (select max(count_mentioned) from mentions)
+
+--2nd 
+WITH reviews AS (
+  SELECT
+    place_category,
+    COUNT(ugc.content_id) AS content_count
+  FROM place_info place
+  INNER JOIN maps_ugc_review ugc
+    ON place.place_id = ugc.place_id
+  WHERE LOWER(content_tag) = 'off-topic'
+  GROUP BY place_category
+)
+, top_place_category AS (
+  SELECT
+    place_category,
+    content_count,
+    RANK() OVER (
+      ORDER BY content_count DESC) AS top_place
+  FROM reviews
+)
+
+SELECT place_category AS off_topic_places
+FROM top_place_category
+WHERE top_place = 1
+
+
