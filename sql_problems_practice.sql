@@ -1038,3 +1038,207 @@ FROM top_place_category
 WHERE top_place = 1
 
 
+/* 36
+As a Data Analyst on Snowflake's Marketing Analytics team, you're analyzing 
+the CRM to determine what percent of marketing touches were of type "webinar" in April 2022. 
+Round your percentage to the nearest integer.
+*/ 
+
+--1st 
+select 
+  round(100.0 * count(event_type) filter(where event_type = 'webinar') 
+    / count(*), 0) as webinar_pct
+from marketing_touches
+where event_date between '2022-04-01' and '2022-04-30'
+
+--2nd
+SELECT 
+  ROUND(100 *
+    SUM(CASE WHEN event_type='webinar' THEN 1 ELSE 0 END)/
+    COUNT(*)) as webinar_pct
+FROM marketing_touches
+WHERE DATE_TRUNC('month', event_date) = '04/01/2022'
+
+
+/* 37
+You're given a list of numbers representing the number of emails in the inbox of Microsoft Outlook users. 
+Before the Product Management team can start developing features related to bulk-deleting email or achieving inbox zero, 
+they simply want to find the mean, median, and mode for the emails.
+
+Display the output of mean, median and mode (in this order), with the mean rounded to the nearest integer. 
+It should be assumed that there are no ties for the mode.
+
+user_id | email_count 
+―――――――――――――――――――――
+123 	| 100   
+234 	| 200   
+*/
+
+select 
+  round(avg(email_count)) as mean,
+  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY email_count) AS median,
+  mode() WITHIN GROUP (ORDER BY email_count) as mode
+from inbox_stats
+
+
+/* 38 [Transformations, pivot rows into columns]
+Each user can designate a personal email address, a business email address, and a recovery email address.
+The table is currently in the wrong format, so you need to transform its structure to show the 
+following columns (see example output): user id, personal email, business email, and recovery email. 
+Sort your answer by user id in ascending order.
+
+user_id | email_type | email
+――――――――――――――――――――――――――――
+123 	| 100   	 | email@host.com
+234 	| 200   	 | email001@host.com
+*/ 
+
+--1st
+with personal_emails as(
+select *
+from users
+where email_type ilike 'personal')
+, business_emails as(
+select *
+from users
+where email_type ilike 'business')
+, recovery_emails as(
+select *
+from users
+where email_type ilike 'recovery')
+
+select 
+  COALESCE(p.user_id, b.user_id, r.user_id),
+  p.email as personal,
+  b.email as business,
+  r.email as recovery
+from personal_emails as p 
+full join business_emails as b on p.user_id=b.user_id
+full join recovery_emails as r on p.user_id=r.user_id
+
+--2nd, For this using aggregate data using MAX, because it ignores NULLs. 
+--You need the max of each column grouped by the user_id so you group all of the entries for each user id together.
+SELECT
+  user_id,
+  MAX(CASE WHEN email_type = 'personal' THEN email 
+    ELSE NULL END) AS personal,
+  MAX(CASE WHEN email_type = 'business' THEN email
+    ELSE NULL END) AS business,
+  MAX(CASE WHEN email_type = 'recovery' THEN email
+    ELSE NULL END) AS recovery
+FROM users
+GROUP BY user_id
+ORDER BY user_id
+
+--3rd, Also with MAX
+SELECT
+  user_id,
+  MAX (email) FILTER (WHERE email_type = 'personal') AS personal, 
+  MAX (email) FILTER (WHERE email_type = 'business') AS business, 
+  MAX (email) FILTER (WHERE email_type = 'recovery') AS recovery
+FROM users
+GROUP BY user_id
+ORDER BY user_id
+
+
+/* 39
+For every customer that bought Photoshop, return a list of the customers, 
+and the total spent on all the products except for Photoshop products.
+Sort your answer by customer ids in ascending order.
+*/ 
+
+select 
+  customer_id,
+  sum(revenue) as revenue
+from adobe_transactions
+where customer_id IN (select distinct customer_id from adobe_transactions where product = 'Photoshop')
+  and product != 'Photoshop'
+group by customer_id
+order by customer_id
+
+
+/* 40
+The Growth Team at DoorDash wants to ensure that new users, who make orders within their first 14 days on the 
+platform, have a positive experience. However, they have noticed several issues with deliveries that result in a bad experience.
+
+These issues include:
+- Orders being completed incorrectly, with missing items or wrong orders.
+- Orders not being received due to incorrect addresses or drop-off spots.
+- Orders being delivered late, with the actual delivery time being 30 minutes later than the order placement time. 
+  Note that the estimated_delivery_timestamp is automatically set to 30 minutes after the order_timestamp.
+
+Write a query that calculates the bad experience rate for new users who signed up in June 2022 during their first 14 days on the platform. 
+The output should include the percentage of bad experiences, rounded to 2 decimal places.
+
+orders:
+order_id | customer_id | trip_id | status | order_timestamp
+―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+123 	 | 100   	   | 001     |...
+234 	 | 200   	   | 011     |...
+
+trips:
+dasher_id | trip_id | estimated_delivery_timestamp | actual_delivery_timestamp
+―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+... 	  | ...   	| ...                          |...
+
+customers:
+customer_id | signup_timestamp
+――――――――――――――――――――――――――――――
+123 	 	| 05/30/2022 00:00:00
+*/
+
+
+--1st
+with users_june as(
+select 
+  distinct customer_id,
+  signup_timestamp
+from customers 
+where signup_timestamp BETWEEN '2022-06-01' and '2022-06-30')
+, late_trips as(
+select 
+  trip_id,
+  round(extract(epoch from (actual_delivery_timestamp - estimated_delivery_timestamp)) / 60) as late_time
+from trips)
+, orders_within_14d as(
+select 
+  o.order_id,
+  o.customer_id,
+  o.trip_id,
+  o.status
+from orders as o
+inner join users_june as u on o.customer_id=u.customer_id
+where signup_timestamp::date + 14 >= order_timestamp::date)
+
+select 
+  round(100.0 * sum(case when (status IN ('completed incorrectly', 'never received') or late_time>0) then 1 else 0 end)
+  / count(*), 2) as bad_experience_pct
+from orders_within_14d as o
+left join late_trips as t on o.trip_id = t.trip_id
+where o.customer_id IN (select distinct customer_id from users_june)
+
+--2nd 
+WITH june22_cte AS (
+SELECT 
+  orders.order_id,
+  orders.trip_id,
+  orders.status
+FROM customers
+INNER JOIN orders
+  ON customers.customer_id = orders.customer_id
+WHERE EXTRACT(MONTH FROM customers.signup_timestamp) = 6
+  AND EXTRACT(YEAR FROM customers.signup_timestamp) = 2022
+  AND orders.order_timestamp BETWEEN customers.signup_timestamp 
+    AND customers.signup_timestamp + INTERVAL '14 DAYS'
+)
+
+SELECT 
+  ROUND(
+    100.0 *
+      COUNT(june22.order_id)
+      / (SELECT COUNT(order_id) FROM june22_cte)
+  ,2) AS bad_experience_pct
+FROM june22_cte AS june22
+INNER JOIN trips
+  ON june22.trip_id = trips.trip_id
+WHERE june22.status IN ('completed incorrectly', 'never received');
