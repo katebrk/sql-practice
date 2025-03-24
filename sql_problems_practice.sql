@@ -1241,4 +1241,138 @@ SELECT
 FROM june22_cte AS june22
 INNER JOIN trips
   ON june22.trip_id = trips.trip_id
-WHERE june22.status IN ('completed incorrectly', 'never received');
+WHERE june22.status IN ('completed incorrectly', 'never received')
+
+/* 41
+You are given a table of PayPal payments showing the payer, the recipient, and the amount paid. 
+A two-way unique relationship is established when two people send money back and forth. 
+Write a query to find the number of two-way unique relationships in this data.
+
+Assumption: 
+- A payer can send money to the same recipient multiple times.
+
+payments:
+payer_id | recipient_id | amount 
+――――――――――――――――――――――――――――――――――
+101 	 | 201   	    | 30     
+201 	 | 101   	    | 10    
+*/ 
+
+--1st, using ROW_NUMBER()
+with duplicated_payments as (
+select 
+  p1.payer_id,
+  p1.recipient_id,
+  p2.payer_id,
+  p2.recipient_id,
+  row_number() over(PARTITION by p1.payer_id, p1.recipient_id, p2.payer_id, p2.recipient_id) as rnk
+from payments as p1
+inner join payments as p2 
+  on p1.payer_id=p2.recipient_id
+  and p1.recipient_id=p2.payer_id)
+  
+select
+  count(*) / 2 as unique_relationships --dividing by 2 because earlier we got all pairs of 2-way transactions
+from duplicated_payments
+where rnk=1
+
+--2nd, using INTERSECT operator
+/* The INTERSECT operator combines two SELECT statements and returns only the distinct results that are common to 
+both queries (meaning there are no duplicates). That is, if there are many back-and-forth transactions between two people, 
+we'll only obtain two rows, as displayed above. If two people have a one-way transaction relationship, those will be 
+eliminated because the payer never becomes the recipient in this situation.*/ 
+WITH relationships AS (
+SELECT payer_id, recipient_id
+FROM payments
+INTERSECT
+SELECT recipient_id, payer_id
+FROM payments)
+
+SELECT COUNT(payer_id) / 2 AS unique_relationships
+FROM relationships
+
+
+/* 42 
+In consulting, being "on the bench" means you have a gap between two client engagements. Google wants to know how many days 
+of bench time each consultant had in 2021. Assume that each consultant is only staffed to one consulting engagement at a time.
+Write a query to pull each employee ID and their total bench time in days during 2021.
+
+Assumptions:
+- All listed employees are current employees who were hired before 2021.
+- The engagements in the consulting_engagements table are complete for the year 2022.
+
+staffing:
+employee_id | is_consultant | job_id 
+――――――――――――――――――――――――――――――――――
+111 	    | true   	    | 7898     
+121 	    | false   	    | 2353    
+
+consulting_engagements:
+job_id | client_id | start_date          | end_date 			| contract_amount
+―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+7898   | 20076     | 05/25/2021 00:00:00 | 06/30/2021 00:00:00	| 11290.00
+2353   | 20045     | 06/01/2021 00:00:00 | 11/12/2021 00:00:00	| 33040.00
+*/ 
+
+with consultants as(
+select *
+from staffing
+where is_consultant = 'true')
+
+, working_days as (
+select 
+  c.employee_id,
+  sum(end_date - start_date) as working_days,
+  count(e.job_id) as inclusive_days --adding 1 day for each job, counting the number of job IDs for each employee is the same as adding an additional day for each job
+from consulting_engagements as e
+inner join consultants as c 
+  on e.job_id=c.job_id
+group by c.employee_id)
+
+select 
+  employee_id,
+  365 - (working_days + inclusive_days) as bench_days
+from working_days
+
+
+/* 43 - Cumulative orders by product type
+
+Assume you're given a table containing Amazon purchasing activity. 
+Write a query to calculate the cumulative purchases for each product type, ordered chronologically.
+The output should consist of the order date, product, and the cumulative sum of quantities purchased.
+*/ 
+
+select 
+  order_date,
+  product_type,
+  sum(quantity) over(PARTITION by product_type order by order_date) as cum_purchased
+from total_trans
+order by order_date
+
+
+/* 44 
+Say you have access to all the transactions for a given merchant account. Write a query to print the cumulative balance 
+of the merchant account at the end of each day, with the total balance reset back to zero at the end of the month. 
+Output the transaction date and cumulative balance.
+
+transactions:
+transaction_id | type    | amount | transaction_date
+―――――――――――――――――――――――――――――――――――――――――――――――――――――
+19153 	       | deposit | 65.90  | 07/10/2022 10:00:00
+*/ 
+
+with daily_balance as(
+select 
+  DATE_TRUNC('day', transaction_date) as transaction_day,
+  DATE_TRUNC('month', transaction_date) as transaction_month,
+  sum(case when type = 'withdrawal' then -1 * amount
+      else amount end) as balance
+from transactions
+group by DATE_TRUNC('day', transaction_date), 
+         DATE_TRUNC('month', transaction_date)
+order by transaction_day)
+
+select 
+  transaction_day as transaction_date,
+  sum(balance) over(partition by transaction_month order by transaction_day) as balance
+from daily_balance
