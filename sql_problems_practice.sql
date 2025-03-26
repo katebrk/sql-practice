@@ -1376,3 +1376,110 @@ select
   transaction_day as transaction_date,
   sum(balance) over(partition by transaction_month order by transaction_day) as balance
 from daily_balance
+
+
+/* 45
+Assume you are given the table below containing information on user purchases. 
+Write a query to obtain the number of users who purchased the same product on 
+two or more different days. Output the number of unique users.
+
+purchases:
+user_id	integer
+product_id	integer
+quantity	integer
+purchase_date	datetime
+*/ 
+
+--1st
+with repeat_orders as(
+select 
+  user_id,
+  product_id,
+  count(distinct purchase_date::date) as count_days
+from purchases
+group by user_id, product_id 
+having count(distinct purchase_date::date) >= 2)
+
+select count(DISTINCT user_id) as repeat_purchasers
+from repeat_orders
+
+--2nd, with subquery
+SELECT COUNT(DISTINCT users) AS repeated_purchasers
+FROM (
+  SELECT DISTINCT user_id AS users
+  FROM purchases
+  GROUP BY user_id, product_id
+  HAVING COUNT(DISTINCT purchase_date::DATE) > 1
+) AS repeat_purchases;
+
+--3rd, with self-join
+SELECT COUNT(DISTINCT p1.user_id) AS repeated_purchasers
+FROM purchases AS p1
+INNER JOIN purchases AS p2
+  ON p1.product_id = p2.product_id
+    AND p1.purchase_date::DATE <> p2.purchase_date::DATE
+	
+	
+/* 46 Average vacant days 
+
+The strategy team in Airbnb is trying to analyze the impact of Covid-19 during 2021. To do so, they need you 
+to write a query that outputs the average vacant days across the AirBnbs in 2021. Some properties have gone out of business, 
+so you should only analyze rentals that are currently active. Round the results to a whole number.
+
+Assumptions:
+- is_active field equals to 1 when the property is active, and 0 otherwise.
+- In cases where the check-in or check-out date is in another year other than 2021, limit the calculation 
+to the beginning or end of the year 2021 respectively.
+- Listing can be active even if there are no bookings throughout the year. 
+
+bookings Table:
+Column Name	Type
+listing_id	integer
+checkin_date	date
+checkout_date	date
+
+listings Table:
+Column Name	Type
+listing_id	integer
+is_active	integer
+*/ 
+
+--1st 
+with bookings_2021 as(
+select 
+  l.listing_id, 
+  365 - COALESCE( sum(
+    case when checkout_date>'12/31/2021' then '2021-12-31' else checkout_date end - --checkout_date
+    case when checkin_date<'01/01/2021' then '2021-01-01' else checkin_date end) -- checkin_date
+  ,0) as booked_days 
+from listings as l
+left join bookings as b
+  on l.listing_id=b.listing_id
+where is_active=1
+group by l.listing_id)
+
+select round(avg(booked_days)) as avg_vacant_days
+from bookings_2021
+
+--2nd 
+WITH final AS 
+(
+  SELECT l.listing_id, checkin_date, checkout_date,
+         CASE
+         WHEN EXTRACT(year FROM checkin_date) = 2021 AND EXTRACT(year FROM checkout_date) = 2021 THEN checkout_date - checkin_date
+         WHEN EXTRACT(year FROM checkin_date) = 2020 AND EXTRACT(year FROM checkout_date) = 2021 THEN checkout_date - '01/01/2021' 
+         WHEN EXTRACT(year FROM checkin_date) = 2021 AND EXTRACT(year FROM checkout_date) = 2022 THEN '12/31/2021' - checkin_date 
+         ELSE 0 END AS occupied_days
+  FROM listings AS l
+  LEFT OUTER JOIN bookings AS b
+  ON l.listing_id = b.listing_id 
+  WHERE is_active = 1
+)
+
+SELECT ROUND(AVG(vacant_days)) AS avg_vacant_days
+FROM
+(
+  SELECT (365 - SUM(occupied_days)) AS vacant_days
+  FROM final 
+  GROUP BY listing_id
+) AS vacant_days_table
