@@ -1483,3 +1483,258 @@ FROM
   FROM final 
   GROUP BY listing_id
 ) AS vacant_days_table
+
+
+/* 47 
+As the Sales Operations Analyst at Oracle, you have been tasked with assisting the VP of Sales in determining 
+the final compensation earned by each salesperson for the year. The compensation structure includes a fixed base salary, 
+a commission based on total deals, and potential accelerators for exceeding their quota.
+
+Each salesperson earns a fixed base salary and a percentage of commission on their total deals. Also, if they beat their 
+quota, any sales after that receive an accelerator, which is just a higher commission rate applied to their commissions after they hit the quota.
+
+Write a query that calculates the total compensation earned by each salesperson. The output should include the employee ID 
+and their corresponding total compensation, sorted in descending order. In the case of ties, the employee IDs should be sorted in ascending order.
+
+Assumptions:
+-A salesperson is considered to have hit their target (quota) if their total deals meet or exceed the assigned quota.
+-If a salesperson does not meet the target, their compensation package consists of the fixed base salary and a commission based on the total deals.
+-If a salesperson meets the target, their compensation package includes
+--The fixed base salary,
+--A commission on target (quota), and
+--An additional commission, including any accelerator on the remaining balance of the total deals (total deals - quota). 
+The accelerator represents a higher commission rate for sales made beyond the quota.
+
+employee_contract Table:
+Column Name	Type
+employee_id	integer
+base	integer
+commission	double
+quota	integer
+accelerator	double
+
+deals Table:
+Column Name	Type
+employee_id	integer
+deal_size	integer
+*/ 
+
+--1st
+with total_deals as(
+select 
+  employee_id,
+  sum(deal_size) as total_deals
+from deals
+group by employee_id)
+, full_salaries as(
+select 
+  e.employee_id,
+  quota,
+  total_deals,
+  accelerator,
+  commission,
+  accelerator,
+  base, 
+  case 
+    when total_deals >= quota then commission*quota
+    else commission*total_deals end as commission_on_target,
+  case 
+    when total_deals > quota then commission*(total_deals-quota)*accelerator
+    else 0 end as commission_on_excess_sales
+from employee_contract as e
+inner join total_deals as d
+  on e.employee_id=d.employee_id)
+  
+select 
+  employee_id,
+  base + commission_on_target + commission_on_excess_sales as total_compensation
+from full_salaries
+order by total_compensation desc, employee_id
+
+--2nd
+SELECT 
+  deals.employee_id,
+  CASE 
+    WHEN SUM(deals.deal_size) <= employee.quota 
+      THEN employee.base + (employee.commission * SUM(deals.deal_size)) -- #1
+    ELSE employee.base + (employee.commission * employee.quota) + 
+      ((SUM(deals.deal_size) - employee.quota) * employee.commission * employee.accelerator) -- #2
+  END AS total_compensation
+FROM deals
+INNER JOIN employee_contract AS employee
+  ON deals.employee_id = employee.employee_id
+GROUP BY deals.employee_id, employee.quota, employee.base, employee.commission, employee.accelerator
+ORDER BY total_compensation DESC, deals.employee_id
+
+
+/* 48
+Assume you are given the table below containing the information on the searches attempted and the percentage of invalid 
+searches by country. Write a query to obtain the percentage of invalid searches.
+
+Output the country in ascending order, total searches and overall percentage of invalid searches rounded to 2 decimal places.
+
+Notes:
+-num_search = Number of searches attempted; invalid_result_pct = Percentage of invalid searches.
+-In cases where countries have search attempts but do not have a percentage of invalid searches in 
+invalid_result_pct, it should be excluded, and vice versa.
+-To find the percentages, multiply by 100.0 and not 100 to avoid integer division.
+
+search_category Table:
+Column Name	Type
+country	string
+search_cat	string
+num_search	integer
+invalid_result_pct	decimal
+*/ 
+
+with invalid_searches as(
+select 
+  country,
+  search_cat,
+  num_search,
+  num_search*round(invalid_result_pct/100, 4) as invalid_num_search
+from search_category
+where invalid_result_pct is not null 
+order by country)
+
+select 
+  country,
+  sum(num_search) as total_search,
+  round(100.0 * sum(invalid_num_search) / sum(num_search),2) as invalid_searches_pct
+from invalid_searches
+group by country
+having sum(num_search) is not null 
+order by country
+
+--2nd
+SELECT 
+  country,
+  SUM(num_search) AS total_searches,
+  ROUND(SUM(num_search * invalid_result_pct)/SUM(num_search),2) AS invalid_searches_pct
+FROM search_category
+WHERE invalid_result_pct IS NOT NULL
+GROUP BY country
+ORDER BY country
+
+
+/* 
+The LinkedIn Creator team is looking for power creators who use their personal profile as a company or influencer page. 
+This means that if someone's Linkedin page has more followers than all the company they work for, we can safely assume 
+that person is a Power Creator. Keep in mind that if a person works at multiple companies, we should take into account 
+the company with the most followers.
+Write a query to return the IDs of these LinkedIn power creators in ascending order.
+
+Assumptions:
+-A person can work at multiple companies.
+-In the case of multiple companies, use the one with largest follower base.
+*/
+
+with ranked_companies as(
+select 
+  personal_profile_id,
+  ec.company_id,
+  c.followers,
+  max(c.followers) over(PARTITION by personal_profile_id) as max_followers
+from employee_company as ec 
+left join company_pages as c 
+  on ec.company_id=c.company_id)
+  
+select 
+  distinct p.profile_id
+from personal_profiles as p 
+left join ranked_companies as c 
+  on p.profile_id=c.personal_profile_id
+where p.followers > c.max_followers
+order by p.profile_id
+
+--2nd 
+SELECT 
+	pp.profile_id 
+FROM personal_profiles pp 
+JOIN employee_company  ec 
+	ON ec.personal_profile_id = pp.profile_id
+JOIN company_pages cp 
+	ON cp.company_id = ec.company_id
+GROUP BY pp.profile_id,pp.followers
+HAVING pp.followers > max(cp.followers)
+ORDER BY  pp.profile_id
+
+/* 
+As a Data Analyst on the People Operations team at Accenture, you are tasked with understanding how many 
+consultants are staffed to each client, and specifically how many consultants are exclusively staffed to a single client.
+
+Write a query that displays the client name along with the total number of consultants attached to each client, 
+and the number of consultants who are exclusively staffed to each client (consultants working exclusively for that client). 
+Ensure the results are ordered alphabetically by client name.
+
+employees Table:
+Column Name	Type
+employee_id	integer
+engagement_id	integer
+
+consulting_engagements Table:
+Column Name	Type
+engagement_id	integer
+project_name	string
+client_name	string
+*/ 
+
+with total_cons as(
+select 
+  client_name,
+  count(distinct employee_id) as total_consultants
+from employees as e 
+left join consulting_engagements as c
+  on e.engagement_id=c.engagement_id
+group by client_name
+order by client_name)
+
+, unique_consultants as (
+select 
+  e.employee_id
+from employees as e 
+left join consulting_engagements as c
+  on e.engagement_id=c.engagement_id 
+group by e.employee_id
+having count(distinct client_name)=1)
+
+, unique_consultants_client as(
+select 
+  client_name,
+  count(DISTINCT e.employee_id) as single_client_consultants
+from employees as e 
+left join consulting_engagements as c 
+  on e.engagement_id=c.engagement_id
+where e.employee_id IN (select * from unique_consultants)
+group by client_name)
+
+select 
+  t.client_name,
+  t.total_consultants,
+  COALESCE(u.single_client_consultants,0) as single_client_consultants
+from total_cons as t
+full outer join unique_consultants_client as u
+  on t.client_name=u.client_name
+order by t.client_name
+
+--2nd
+WITH single_client_consultants AS (
+  SELECT employees.employee_id
+  FROM employees
+  INNER JOIN consulting_engagements AS engagements
+    ON employees.engagement_id = engagements.engagement_id
+  GROUP BY employees.employee_id
+  HAVING COUNT(DISTINCT engagements.client_name) = 1
+)
+
+SELECT 
+  engagements.client_name, 
+  COUNT(DISTINCT employees.employee_id) AS total_consultants,
+  COUNT(DISTINCT single.employee_id) AS single_client_consultants
+FROM employees
+INNER JOIN consulting_engagements AS engagements 
+  ON employees.engagement_id = engagements.engagement_id
+LEFT JOIN single_client_consultants AS single
+  ON employees.employee_id = single.employee_id
+GROUP BY engagements.client_name
+ORDER BY engagements.client_name
