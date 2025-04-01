@@ -1738,3 +1738,96 @@ LEFT JOIN single_client_consultants AS single
   ON employees.employee_id = single.employee_id
 GROUP BY engagements.client_name
 ORDER BY engagements.client_name
+
+
+
+/*
+Assuming Salesforce operates on a per user (per seat) pricing model, we have a table containing contracts data.
+
+Write a query to calculate the average annual revenue per Salesforce customer in three market segments: SMB, Mid-Market, and Enterprise. Each customer is represented by a single contract. Format the output to match the structure shown in the Example Output section below.
+
+Assumptions:
+
+Yearly seat cost refers to the cost per seat.
+Each customer is represented by one contract.
+The market segments are categorized as:-
+SMB (less than 100 employees)
+Mid-Market (100 to 999 employees)
+Enterprise (1000 employees or more)
+The terms "average deal size" and "average revenue" refer to the same concept which is the average annual revenue generated per customer in each market segment.
+
+contracts Table:
+Column Name	Type
+customer_id	integer
+num_seats	integer
+yearly_seat_cost	integer
+
+customers Table:
+Column Name	Type
+customer_id	integer
+name	varchar
+employee_count	integer (0-100,000)
+*/ 
+
+with customer_segments as(
+select 
+  customer_id,
+  case when employee_count<100 then 'SMB'
+    when employee_count>=100 and employee_count<999 then 'Mid-Market'
+    when employee_count>=1000 then 'Enterprise'
+  end as market_segment
+from customers) 
+
+, revenue_per_segment as(
+select 
+  cs.market_segment,
+  sum(num_seats*yearly_seat_cost) / COUNT(DISTINCT cs.customer_id) as revenue_per_deal
+from contracts as c 
+inner join customer_segments as cs 
+on c.customer_id=cs.customer_id
+group by cs.market_segment)
+
+select 
+  sum(case when market_segment='SMB' then revenue_per_deal end) as smb_avg_revenue,
+  sum(case when market_segment='Mid-Market' then revenue_per_deal end) as mid_avg_revenue,
+  sum(case when market_segment='Enterprise' then revenue_per_deal end) as enterprise_avg_revenue
+from revenue_per_segment
+
+
+/* 
+The Bloomberg terminal is the go-to resource for financial professionals, offering convenient access to a wide array of financial datasets. As a Data Analyst at Bloomberg, you have access to historical data on stock performance for the FAANG stocks.
+
+Your task is to analyze the inter-month change in percentage for each FAANG stock by month over the years. This involves calculating the percentage change in closing price from one month to the next using the following formula:
+
+Inter-month change in percentage = (Current month's closing price - Previous month's closing price) / Previous month's closing price x 100
+
+For each FAANG stock, display the ticker symbol, the last day of the month, closing price, and the inter-month value change in percentage rounded to two decimal places for each stock. Ensure that the results are sorted by ticker symbol and date in chronological order.
+
+stock_prices Schema:
+Column Name	Type	Description
+date	datetime	The specified date (mm/dd/yyyy) of the stock data.
+ticker	varchar	The stock ticker symbol (e.g., AAPL) for the corresponding company.
+open	decimal	The opening price of the stock at the start of the trading day.
+high	decimal	The highest price reached by the stock during the trading day.
+low	decimal	The lowest price reached by the stock during the trading day.
+close	decimal	The closing price of the stock at the end of the trading day.
+*/ 
+
+WITH intermonth_prices AS (
+  SELECT
+    ticker,
+    date,
+    close,
+    LAG(close) OVER (PARTITION BY ticker ORDER BY date) AS prev_close
+  FROM stock_prices
+)
+
+SELECT 
+  ticker,
+  date,
+  close,
+  ROUND((close - prev_close)/prev_close*100,2) AS intermth_change_pct
+FROM intermonth_prices
+ORDER BY ticker, date;
+
+
