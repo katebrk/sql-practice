@@ -1831,3 +1831,191 @@ FROM intermonth_prices
 ORDER BY ticker, date;
 
 
+
+
+/* Consecutive Filing Years
+
+Intuit, a company known for its tax filing products like TurboTax and QuickBooks, offers multiple versions of these products.
+
+Write a query that identifies the user IDs of individuals who have filed their taxes using any version of TurboTax for three or
+ more consecutive years. Each user is allowed to file taxes once a year using a specific product. Display the output in the ascending order of user IDs.
+
+filed_taxes Table:
+Column Name	Type
+filing_id	integer
+user_id	varchar
+filing_date	datetime
+product	varchar
+*/ 
+
+with turbotax_filings_cte as (
+select 
+  filing_id, 
+  user_id,
+  date_trunc('year', filing_date) as filing_year,
+  lag(date_trunc('year', filing_date)) over(PARTITION by user_id order by filing_date) as previous_year,
+  lead(date_trunc('year', filing_date)) over(PARTITION by user_id order by filing_date) as following_year
+from filed_taxes 
+where product ilike '%TurboTax%')
+
+select 
+  user_id
+from turbotax_filings_cte
+where (previous_year = filing_year - interval '1 year')
+  and (following_year = filing_year + interval '1 year')
+group by user_id
+
+/* 
+As a Data Analyst on Snowflake's Marketing Analytics team, your objective is to analyze customer relationship 
+management (CRM) data and identify contacts that satisfy two conditions:
+1. Contacts who had a marketing touch for three or more consecutive weeks.
+2. Contacts who had at least one marketing touch of the type 'trial_request'.
+Marketing touches, also known as touch points, represent the interactions or points of contact between a brand and its customers.
+
+Your goal is to generate a list of email addresses for these contacts.
+
+marketing_touches Table:
+Column Name	Type
+event_id	integer
+contact_id	integer
+event_type	string ('webinar', 'conference_registration', 'trial_request')
+event_date	date
+
+crm_contacts Table:
+Column Name	Type
+contact_id	integer
+email	string
+*/
+
+with trial_requests_customers as(
+select 
+  m.contact_id,
+  c.email
+from marketing_touches as m
+inner join crm_contacts as c 
+  on m.contact_id=m.contact_id
+where m.event_type ilike 'trial_request')
+
+, touch_weeks as(
+select 
+  contact_id,
+  date_trunc('week', event_date) as event_week,
+  lag(date_trunc('week', event_date)) over(PARTITION by contact_id order by event_date) as prev_week,
+  lead(date_trunc('week', event_date)) over(PARTITION by contact_id order by event_date) as foll_week
+from marketing_touches)
+
+select 
+  email
+from touch_weeks as w
+left join crm_contacts as c
+  on w.contact_id=c.contact_id
+where (prev_week=event_week - interval '7 days')
+  and (foll_week=event_week + interval '7 days')
+group by w.contact_id, email
+
+
+/* 
+
+UnitedHealth Group (UHG) has a program called Advocate4Me, which allows policy holders (or, members) to call 
+an advocate and receive support for their health care needs – whether that's claims and benefits support, drug 
+coverage, pre- and post-authorisation, medical records, emergency assistance, or member portal services.
+
+Write a query to obtain the number of unique callers who made calls within a 7-day interval of their previous calls. 
+If a caller made more than two calls within the 7-day period, count them only once.
+
+callers Table:
+Column Name	Type
+policy_holder_id	integer
+case_id	varchar
+call_category	varchar
+call_date	timestamp
+call_duration_secs	integer
+*/
+
+--1st 
+with diff_seconds as(
+SELECT
+  policy_holder_id,
+  call_date,
+  LAG(call_date) OVER (
+  	PARTITION BY policy_holder_id ORDER BY call_date) AS previous_call,
+  round(extract(epoch from call_date 
+  - LAG(call_date) OVER (
+  	PARTITION BY policy_holder_id ORDER BY call_date))
+  /(24*60*60),2) AS time_diff_secs --1 day = 24 hours x 60 minutes x 60 seconds
+FROM callers)
+
+select 
+  count(distinct(policy_holder_id)) as policy_holder_count
+from diff_seconds
+where time_diff_secs <= 7
+
+--2nd using interval
+WITH call_history AS (
+  SELECT 
+    policy_holder_id,
+    call_date AS current_call,
+    LEAD(call_date) OVER (
+      PARTITION BY policy_holder_id ORDER BY call_date) AS next_call
+  FROM callers
+)
+
+SELECT COUNT(DISTINCT policy_holder_id) AS policy_holder_count
+FROM call_history
+WHERE current_call + INTERVAL '168 hours' >= next_call
+
+--3rd 
+with cte as(
+select 
+  policy_holder_id,	
+  case_id,	
+  call_date,  
+  count(policy_holder_id) over(partition by policy_holder_id order by call_date 
+    RANGE INTERVAL '7 days' PRECEDING)
+FROM callers)
+
+select 
+  count(distinct policy_holder_id) as policy_holder_count
+from cte
+where count = 2
+
+/* Month over month growth 
+
+UnitedHealth Group (UHG) has a program called Advocate4Me, which allows policy holders (or, members) to call an 
+advocate and receive support for their health care needs – whether that's claims and benefits support, 
+drug coverage, pre- and post-authorisation, medical records, emergency assistance, or member portal services.
+
+To analyze the performance of the program, write a query to determine the month-over-month growth rate specifically 
+for long-calls. A long-call is defined as any call lasting more than 5 minutes (300 seconds).
+
+Output the year and month in numerical format and chronological order, along with the growth percentage rounded 
+to 1 decimal place.
+
+callers Table:
+Column Name	Type
+policy_holder_id	integer
+case_id	varchar
+call_category	varchar
+call_date	timestamp
+call_duration_secs	integer
+*/
+
+with long_calls_count as (
+select 
+  extract(year from call_date) as call_year,
+  extract(month from call_date) as call_month,
+  count(case_id) as calls_count
+from callers
+where call_duration_secs>300
+group by 1,2
+order by 1,2)
+
+select 
+  call_year as yr,
+  call_month as mth, 
+  --lag(calls_count) over() as prev_month_calls_count,
+  round(
+    100.0 * (calls_count - lag(calls_count) over()) 
+    / lag(calls_count) over()
+    ,1) as long_calls_growth_pct
+from long_calls_count
