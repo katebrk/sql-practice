@@ -2019,3 +2019,211 @@ select
     / lag(calls_count) over()
     ,1) as long_calls_growth_pct
 from long_calls_count
+
+
+/*
+You are given the two tables containing information on Etsy’s user signups and purchases. Write a query to obtain the percentage of users 
+who signed up and made a purchase within 7 days of signing up. The result should be rounded to the nearest 2 decimal places.
+
+Assumptions:
+
+Signups who didn't buy any products yet should also count as part of the percentage of users who signed up and made a purchase within 7 days of signing up
+If the signup date is on 06/21/2022 and the purchase date on 06/26/2022, then the user makes up part of the percentage of users who signed up 
+and purchased within the 7 days of signing up.
+
+signups Table:
+Column Name	Type
+user_id	integer
+signup_date	datetime
+
+user_purchases Table:
+Column Name	Type
+user_id	integer
+product_id	integer
+purchase_amount	decimal
+purchase_date	datetime
+*/ 
+
+with users as(
+SELECT 
+  COALESCE(p.user_id, s.user_id) as user_id,
+  case when p.purchase_date::date is not null then p.purchase_date::date 
+    else '2030-01-01' end as purchase_date,
+  s.signup_date::date,
+  (case when p.purchase_date::date is not null then p.purchase_date::date 
+    else '2030-01-01' end) - s.signup_date::date as days_diff
+FROM user_purchases as p
+full outer join signups as s
+on s.user_id=p.user_id)
+
+select 
+  round(100.0*count(distinct user_id) filter (where days_diff<7) 
+    / count(distinct user_id), 2) as same_week_purchases_pct
+from users 
+
+/*
+The Apple retention team needs your help to investigate buying patterns. Write a query to determine the percentage of 
+buyers who bought AirPods directly after they bought iPhones. Round your answer to a percentage (i.e. 20 for 20%, 50 for 50) with no decimals.
+
+Clarifications:
+- The users were interested in buying iPhones and then AirPods, with no intermediate purchases in between.
+- Users who buy iPhones and AirPods at the same time, with the iPhone logged first, can still be counted.
+
+transactions Table:
+Column Name	Type
+transaction_id	integer
+customer_id	integer
+product_name	varchar
+transaction_timestamp	datetime
+*/
+
+with transactions_ranked as (
+select 
+  *,
+  lead(product_name) over(PARTITION by customer_id order by transaction_id) as next_purchase
+from transactions)
+
+select 
+  round(100.0 * count(distinct customer_id) filter (
+    where product_name = 'iPhone' and next_purchase = 'AirPods')
+  / count(distinct customer_id), 0) as follow_up_percentage
+from transactions_ranked
+
+/*
+Write a query to recommend a page to a user. A recommendation is based on a page liked by user friends. 
+Assume you have two tables: a two-column table of users and their friends, and a two-column table of users and the pages they liked.
+
+Assumptions:
+- Only recommend the top page to the user, and do not recommend pages that were already liked by the user.
+  Top page is defined as the page with the highest number of followers.
+- Output the user id and page recommended. Order the result in ascending order by user id.
+
+friendship Table:
+Column Name	Type
+id	integer
+user_id	string
+friend_id	string
+
+page_following Table:
+Column Name	Type
+id	integer
+user_id	string
+page_id	string
+*/
+
+--establish 2way relationship between user and their friends by merging the table into itself 
+WITH two_way_friendship AS (
+SELECT 
+	user_id, 
+	friend_id 
+FROM friendship
+UNION 
+SELECT 
+	friend_id, 
+	user_id 
+FROM friendship)
+
+, cte AS (
+SELECT 
+  f.user_id, 
+  pf.page_id, 
+  COUNT(*) AS page_rnk,
+  DENSE_RANK() OVER(PARTITION BY f.user_id ORDER BY COUNT(*) DESC) AS rnk
+FROM two_way_friendship as f
+JOIN page_following AS pf ON f.friend_id = pf.user_id
+WHERE (f.user_id, pf.page_id) NOT IN (
+  SELECT DISTINCT user_id, page_id FROM page_following)
+GROUP BY f.user_id, pf.page_id)
+
+SELECT user_id,	page_id 
+FROM cte 
+WHERE rnk = 1
+
+/*
+Imagine you're provided with a table containing information about user logins on Facebook in 2022. Write a query that determines 
+the number of reactivated users for a given month. Reactivated users are those who were inactive 
+the previous month but logged in during the current month.
+
+Output the month in numerical format along with the count of reactivated users.
+
+Here's some important assumptions to consider:
+- The user_logins table only contains data for the year 2022 and there are no missing dates within that period.
+- For instance, if a user whose first login date is on 3 March 2022, we assume that they had previously logged in during 
+the year 2021. Although the data for their previous logins is not present in the user_logins table, we consider these users as reactivated users.
+
+user_logins Table:
+Column Name	Type
+user_id	integer
+login_date	datetime
+*/
+
+--1st
+with prev_logins as (
+select 
+  user_id,
+  extract(month from login_date) as month_login,
+  lag(extract(month from login_date)) over(
+    PARTITION by user_id order by login_date) as prev_month_login
+from user_logins 
+order by user_id, login_date)
+
+, reactivated_users as (
+select 
+  *,
+  case when month_login-prev_month_login IN (0,1) then 0
+    else 1 end as is_reactivated
+from prev_logins)
+
+select 
+  month_login as mth,
+  count(distinct user_id) as reactivated_users
+from reactivated_users
+where is_reactivated=1
+group by month_login
+order by mth
+
+--2nd
+SELECT 
+  EXTRACT(MONTH FROM curr_month.login_date) AS mth, 
+  COUNT(DISTINCT curr_month.user_id) AS reactivated_users
+FROM user_logins AS curr_month 
+WHERE NOT EXISTS (
+  SELECT * 
+  FROM user_logins AS last_month 
+  WHERE curr_month.user_id = last_month.user_id 
+    AND EXTRACT(MONTH FROM last_month.login_date) = 
+      EXTRACT(MONTH FROM curr_month.login_date - '1 month' :: INTERVAL)
+) 
+GROUP BY EXTRACT(MONTH FROM curr_month.login_date)
+ORDER BY mth
+
+
+/*
+Assume we have a table of Google employees with their corresponding managers.
+
+A manager is an employee with a direct report. A senior manager is an employee who manages at least one manager, 
+but none of their direct reports is senior managers themselves. Write a query to find the senior managers and their direct reports.
+
+Output the senior manager's name and the count of their direct reports. The senior manager with 
+the most direct reports should be the first result.
+
+Assumption:
+An employee can report to two senior managers.
+
+employees Table:
+Column Name	Type
+emp_id	integer
+manager_id	integer
+manager_name	string
+*/
+
+SELECT 
+  managers.manager_name,
+  COUNT(DISTINCT managers.emp_id) AS direct_reportees
+FROM employees -- Represent employees
+JOIN employees AS managers -- Represent managers
+  ON employees.manager_id = managers.emp_id
+JOIN employees AS senior_managers -- Represent senior managers
+  ON managers.manager_id = senior_managers.emp_id
+GROUP BY managers.manager_name
+ORDER BY direct_reportees DESC
