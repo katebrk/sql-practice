@@ -2227,3 +2227,151 @@ JOIN employees AS senior_managers -- Represent senior managers
   ON managers.manager_id = senior_managers.emp_id
 GROUP BY managers.manager_name
 ORDER BY direct_reportees DESC
+
+
+/* ??
+Assume you're given a table containing information about user sessions, including the start and end times of each session. 
+Write a query to retrieve the user session(s) that occur concurrently with the other user sessions.
+
+Output the session ID and the number of concurrent user sessions, sorted in descending order.
+
+Assumptions:
+- Concurrent sessions are defined as sessions that overlap with each other. For instance, if session 1 starts before session 2, 
+  session 2's start time should fall either before or after session 1's end time.
+- Sessions with identical start and end times should not be considered concurrent sessions.
+
+sessions Table:
+Column Name	Type
+session_id	integer
+start_time	datetime
+end_time	datetime
+*/ 
+
+select 
+  s1.session_id,
+  count(s2.session_id) as concurrent_sessions
+from sessions as s1
+inner join sessions as s2 
+  on s1.session_id != s2.session_id 
+  and (s2.start_time between s1.start_time and s1.end_time --condition 1: If session 1 starts before session 2, session 2's start time should fall either before or after session 1's end time
+  or s1.start_time between s2.start_time and s2.end_time) --condition 2: If session 2 starts before session 1, session 1's end time should be greater than session 2's start time
+group by s1.session_id
+order by count(s2.session_id) desc
+
+/*
+Facebook wants to recommend new friends to people who show interest in attending 2 or more of the same private events.
+
+Sort your results in order of user_a_id and user_b_id (refer to the Example Output below).
+
+Notes:
+-A user interested in attending would have either 'going' or 'maybe' as their attendance status.
+-Friend recommendations are unidirectional, meaning if user x and user y should be recommended to each other, 
+the result table should have both user x recommended to user y and user y recommended to user x.
+-The result should not contain duplicates (i.e., user y should not be recommended to user x multiple times).
+
+friendship_status Table:
+Column Name	Type
+user_a_id	integer
+user_b_id	integer
+status	enum ('friends', 'not_friends')
+
+event_rsvp Table:
+Column Name	Type
+user_id	integer
+event_id	integer
+event_type	enum ('public', 'private')
+attendance_status	enum ('going', 'maybe', 'not_going')
+event_date	date
+*/
+
+--1st 
+--find users who are interested in attending private events and count # of users' pairs
+with users_interested_in_same_events as( 
+select 
+  e1.event_id,
+  e1.user_id as user_a_id,
+  e2.user_id as user_b_id,
+  count(e1.event_id) over(PARTITION by e1.user_id, e2.user_id) as events_interested_count
+from event_rsvp as e1
+inner join event_rsvp as e2 
+  on e1.event_id=e2.event_id 
+  and e1.user_id!=e2.user_id
+where e1.attendance_status IN ('going', 'maybe')
+  and e1.event_type = 'private'
+order by e1.event_id)
+
+--find pairs of potential friends who are interested in the same 2+ events
+, recommended_by_events as( 
+select 
+  distinct user_a_id,
+  user_b_id
+from users_interested_in_same_events
+where events_interested_count>=2
+order by user_a_id)
+
+--find pairs who are not friends and merge with potential friends table 
+select 
+  e.user_a_id,
+  e.user_b_id
+from friendship_status as f
+left join recommended_by_events as e
+  on f.user_a_id=e.user_a_id 
+  and f.user_b_id=e.user_b_id
+where status ilike 'not_friends'
+  and e.user_a_id is not null 
+order by e.user_a_id
+
+
+--2nd 
+WITH private_events AS (
+SELECT user_id, event_id
+FROM event_rsvp
+WHERE attendance_status IN ('going', 'maybe')
+  AND event_type = 'private'
+)
+
+SELECT 
+  friends.user_a_id, 
+  friends.user_b_id
+FROM private_events AS events_1
+INNER JOIN private_events AS events_2
+  ON events_1.user_id != events_2.user_id
+  AND events_1.event_id = events_2.event_id
+INNER JOIN friendship_status AS friends
+  ON events_1.user_id = friends.user_a_id
+  AND events_2.user_id = friends.user_b_id
+WHERE friends.status = 'not_friends'
+GROUP BY friends.user_a_id, friends.user_b_id
+HAVING COUNT(*) >= 2
+
+
+/* 
+The Airbnb Booking Recommendations team is trying to understand the "substitutability" of two rentals and whether one rental is a good substitute 
+for another. They want you to write a query to find the unique combination of two Airbnb rentals with the same exact amenities offered.
+Output the count of the unique combination of Airbnb rentals.
+
+Assumptions:
+-If property 1 has a kitchen and pool, and property 2 has a kitchen and pool too, it is a good substitute and represents a unique matching rental.
+-If property 3 has a kitchen, pool and fireplace, and property 4 only has a pool and fireplace, then it is not a good substitute.
+
+rental_amenities Table:
+Column Name	Type
+rental_id	integer
+amenity	string
+*/ 
+
+--combine to string amentities for each rental_id 
+with combines_amenities as(
+select 
+  rental_id,
+  string_agg(amenity, ', ' order by amenity) as amenities
+from rental_amenities
+group by rental_id
+order by rental_id)
+
+select 
+  count(*) as matching_airbnb
+from combines_amenities as a1 
+join combines_amenities as a2 
+  on a1.amenities=a2.amenities 
+where a1.rental_id > a2.rental_id --to exclude duplicate matches 
