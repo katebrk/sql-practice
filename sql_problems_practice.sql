@@ -2375,3 +2375,185 @@ from combines_amenities as a1
 join combines_amenities as a2 
   on a1.amenities=a2.amenities 
 where a1.rental_id > a2.rental_id --to exclude duplicate matches 
+
+
+/* Weekly Churn Rates
+Facebook is analyzing its user signup data for June 2022. Write a query to generate the churn rate by week in June 2022. Output the week number (1, 2, 3, 4, ...) 
+and the corresponding churn rate rounded to 2 decimal places.
+For example, week number 1 represents the dates from 30 May to 5 Jun, and week 2 is from 6 Jun to 12 Jun.
+
+Assumptions:
+-If the last_login date is within 28 days of the signup_date, the user can be considered churned.
+-If the last_login is more than 28 days after the signup date, the user didn't churn.
+
+users Table:
+Column Name	Type
+user_id	integer
+signup_date	datetime
+last_login	datetime
+*/
+
+with churned_users as(
+select 
+  user_id,
+  case 
+    when signup_date between '2022-05-30' and '2022-06-05' then 1
+    when signup_date between '2022-06-06' and '2022-06-12' then 2
+    when signup_date between '2022-06-13' and '2022-06-19' then 3
+    else 4 
+  end as signup_week,
+  case 
+    WHEN last_login - signup_date <= INTERVAL '28 days' THEN 1
+    ELSE 0 
+  END AS churned_users
+from users
+where signup_date between '2022-05-30' and '2022-06-26')
+
+select 
+  signup_week,
+  --count(user_id) as total_users,
+  --sum(churned_users) as churned_users,
+  round(100.0*sum(churned_users)/count(user_id),2) as churn_rate
+from churned_users
+group by signup_week
+order by signup_week
+
+
+
+/*
+As a trading analyst at Bloomberg, your task is to identify specific months when a majority of the FAANG stocks (Facebook, Amazon, Apple,
+ Netflix, Google) experienced a gain in value compared to the previous month, while one stock lagged behind its peers by recording a
+ decrease in value. This analysis involves comparing opening prices from the previous month.
+
+In essence, you're seeking months where 5 out of 6 FAANG stocks demonstrated an increase in value with one stock experiencing a decline.
+
+Write a query to display the month and year in 'Mon-YYYY' format along with the ticker symbol of the stock that underperformed 
+relative to its peers, ordered by month and year (in 'Mon-YYYY' format).
+
+stock_prices Schema:
+Column Name	Type	Description
+date	datetime	The specified date (mm/dd/yyyy) of the stock data.
+ticker	varchar	The stock ticker symbol (e.g., AAPL) for the corresponding company.
+open	decimal	The opening price of the stock at the start of the trading day.
+high	decimal	The highest price reached by the stock during the trading day.
+low	decimal	The lowest price reached by the stock during the trading day.
+close	decimal	The closing price of the stock at the end of the trading day.
+*/
+
+--find prev month open price, and assign 1 to prices which increased compared to prev month 
+with mom_stocks as(
+SELECT
+  date::date,
+  ticker,
+  open as curr_mnt_open,
+  lag(open) over(partition by ticker order by date) as prev_mnt_open,
+  case 
+    when (open > lag(open) over(partition by ticker order by date)) then 1
+    else 0
+  end as increrased_mom
+from stock_prices
+order by date, ticker)
+--find months where were 5 increased prices, and 1 not increased
+,searched_months as(
+select 
+  date::date
+from mom_stocks
+group by date
+having sum(increrased_mom)=5)
+--inner join on both tables 
+select 
+  to_char(s.date, 'Mon-YYYY') as mth_yr,
+  s.ticker as underperforming_stock
+from mom_stocks as s
+inner join searched_months as m on s.date=m.date
+where increrased_mom=0
+order by 1
+
+/* frequently purchased pairs
+
+Given the Walmart transaction and product tables, write a query to determine the count of unique product combinations that are purchased 
+together in the same transaction, considering that there must be a minimum of two products in the transaction. Display the output in 
+ascending order of the product combinations.
+
+For instance, if there are two transactions where apples and bananas are bought together, and another transaction where bananas and 
+soy milk are bought together, the total count of unique combinations would be 2.
+
+Psst, you may or may not need to use the products table.
+
+Effective April 17th, 2023, the problem statement, assumptions, and solution were modified to align with the question.
+
+transactions Table:
+Column Name	Type
+transaction_id	integer
+product_id	integer
+user_id	integer
+transaction_date	datetime
+
+products Table:
+Column Name	Type
+product_id	integer
+product_name	string
+*/ 
+
+--1st 
+WITH array_table AS (
+SELECT 
+  transaction_id, 
+  ARRAY_AGG(CAST(product_id AS TEXT) ORDER BY product_id) as combination
+FROM transactions
+GROUP BY transaction_id
+)
+
+SELECT DISTINCT combination
+FROM array_table
+WHERE ARRAY_LENGTH(combination, 1) > 1
+ORDER BY combination
+
+--2nd 
+SELECT COUNT(*) AS combo_num
+FROM transactions AS p1
+INNER JOIN transactions AS p2
+  ON p1.transaction_id = p2.transaction_id
+  AND p1.product_id > p2.product_id
+ 
+ 
+ /* Compressed Median 
+You are trying to find the median number of items bought per order on Alibaba, rounded to 1 decimal point.
+However, instead of doing analytics on all Alibaba orders, you have access to a summary table, which describes how many items 
+were in an order, and the number of orders that had that many items.
+
+items_per_order Table:
+Column Name	Type
+item_count	integer
+order_occurrences	integer
+ */
+ 
+ --1st 
+ with agg as(
+select 
+  *,
+  sum(order_occurrences) over(order by item_count) as running_sum,
+  sum(order_occurrences) over() / 2 as median_item_order
+from items_per_order)
+
+select 
+  item_count as median
+from agg 
+where median_item_order<=running_sum 
+order by item_count 
+limit 1
+
+--2nd 
+WITH running_orders AS (
+SELECT
+  *,
+  SUM(order_occurrences) OVER (
+    ORDER BY item_count ASC) as running_sum,
+  SUM(order_occurrences) OVER () AS total_sum
+FROM items_per_order
+)
+
+SELECT ROUND(AVG(item_count)::DECIMAL,1) AS median
+FROM running_orders
+WHERE total_sum <= 2 * running_sum
+  AND total_sum >= 2 * (running_sum - order_occurrences);
