@@ -2557,3 +2557,67 @@ SELECT ROUND(AVG(item_count)::DECIMAL,1) AS median
 FROM running_orders
 WHERE total_sum <= 2 * running_sum
   AND total_sum >= 2 * (running_sum - order_occurrences);
+  
+  
+ 
+ 
+ /* Retention rate 
+ */ 
+with orders_monthly as(
+ select 
+	date_trunc('month', order_date) as order_month,
+	customer_id, 
+	count(order_id) as count_orders
+ from orders
+ group by 1, 2
+ order by 1, 2)
+ 
+, prev_month_orders as (
+select 
+	customer_id,
+	order_month,
+	case 
+		when order_month - lag(order_month) over(partition by customer_id order by order_month) = INTERVAL '1 month' then 1 
+		else 0 
+		end as repeat_customer
+from orders_monthly)
+
+select 
+	order_month,
+	count(distinct customer_id) as total_customers,
+	sum(repeat_customer) as repeat_customers,
+	100.0 * sum(repeat_customer) / count(distinct customer_id) as retention_rate 
+from prev_month_orders
+group by order_month
+order by order_month
+
+
+
+/*  Find the customers who made transactions in consecutive months (2 months in a row) 
+
+table: transactions
+transaction_id, customer_id, amount, transaction_date 
+*/
+
+with cte_transactions_month as(
+select 
+	distinct customer_id,
+	date_trunc('month' from transaction_date) as transaction_month
+from transactions)
+
+, prev_month_transactions as(
+select 
+	customer_id,
+	transaction_month,
+	lag(transaction_month) over(partition by customer_id order by transaction_month) as prev_month
+from cte_transactions_month)
+
+SELECT
+    customer_id,
+    transaction_month,
+    prev_month
+FROM prev_month_transactions
+WHERE
+    prev_month IS NOT NULL
+    AND transaction_month = prev_month + INTERVAL '1 month' --or this: date_diff(transaction_month,prev_month)=1
+	
