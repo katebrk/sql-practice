@@ -2621,3 +2621,136 @@ WHERE
     prev_month IS NOT NULL
     AND transaction_month = prev_month + INTERVAL '1 month' --or this: date_diff(transaction_month,prev_month)=1
 	
+	
+/* Classic "top N + others" question 
+
+Find top 9 teams by wins in 2024, and for 10th row for "all others" 
+
+teams
+team_id, name
+
+matches 
+match_id, winner_id, loser_id, season 
+
+wins_2024
+team_id, win_count
+*/ 
+
+-- 1st solution: with UNION ALL and OFFSET 
+-- top 9 teams
+select 
+	t.team_name,
+	w.win_count
+from wins_2024 as w 
+join teams as t on w.team_id = t.team_id 
+order by win_count desc
+limit 9 
+
+union all 
+-- "all others" teams
+select 
+	'All others' as team_name,
+	sum(w.win_count) as win_count 
+from (select w.win_count 
+	  from wins_2024 w 
+	  order by win_count desc 
+	  offset 9) as w 
+
+
+-- 2nd solution: with CTE, ROW_NUMBER() and UNION ALL 
+with ranked_teams as(
+select 
+	t.team_name,
+	wc.win_count,
+	row_number() over(order by wc.win_count desc) as rnk
+from win_counts wc 
+join teams t on wc.team_id = t.team_id)
+
+, top_9 as (
+select 
+	team_name,
+	win_count 
+from ranked_teams 
+where rnk <= 9 )
+
+, all_others as(
+select
+	team_name, 
+	sum(win_count) as win_count 
+from ranked_teams
+where rnk > 9)
+
+select * from top_9
+union all 
+select * from all_others 
+
+/* 
+A repeat customer is someone who makes 2+ purchases, but 2 or more on the same day doesn’t count. 
+Find count of repeat customers. 
+
+purchases
+purchase_id, customer_id, date 
+*/ 
+
+with repeat_customers as(
+select 
+	customer_id
+from purchases 
+group by customer_id
+having count(distinct date) >= 2)
+
+select 
+	count(*) as repeat_customers
+from repeat_customers
+
+
+/* 
+Count customers whose every purchase was organic (on a last-touch attribution basis).
+
+purchases
+purchase_id, customer_id, purchase_time  
+
+marketing_touches 
+customer_id, touch_time, channel
+
+To properly apply last-touch attribution, you need to:
+- Look at each purchase and find the latest touch before that specific purchase.
+- Classify whether that purchase was organic.
+- Identify customers who had only organic purchases (i.e., no purchases attributed to non-organic channels).
+*/ 
+
+-- find all marketing touches that happened before each purchase 
+with all_previous_touches as(
+select 
+	p.customer_id,
+	p.purchase_id, 
+	p.purchase_time,
+	mt.channel, 
+	row_number() over(partition by p.purchase_id order by mt.touch_time desc) as rn --get ranking for each purchase
+from purchases p
+left join marketing_touches mt --if not touch exists before purchase then left join still keeps the purchase with NULL channel 
+	on p.customer_id = mt.customer_id
+	and mt.touch_time < p.purchase_time) 
+	
+--find only last touches and attribute organic to null channels 
+, last_touch as(
+select 
+	customer_id,
+	purchase_id,
+	purchase_time, 
+	coalesce(channel, 'organic') as last_touch_channel -- if no touch then it's organic 
+from all_previous_touches 
+where rn = 1) 
+
+--find not organic customers 
+, non_organic_customers as(
+select 
+	distinct customer_id
+from last_touch
+where last_touch_channel <> 'organic')
+
+--find only organic by removing not organic customers 
+select 
+	count(distinct customer_id) as organic_only_customers
+from last_touch 
+where customer_id NOT IN(select customer_id from non_organic_customers)
