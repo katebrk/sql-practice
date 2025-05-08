@@ -2754,3 +2754,156 @@ select
 	count(distinct customer_id) as organic_only_customers
 from last_touch 
 where customer_id NOT IN(select customer_id from non_organic_customers)
+
+
+-- Classic types of sql problems 
+
+/* Top 3 products by sales + "others"
+Write a query that shows total sales per product, but only keep the top 3 product by total sales as-is. All other product
+should be combined into a signle row with product name "Other". 
+
+sales: 
+product_name, amount 
+*/ 
+
+with ranked_sales as( 
+	select 
+		product_name, 
+		sum(amount) as total_sales,
+		rank() over(oder by sum(amount) desc) as rnk 
+	from sales 
+	group by product_type
+)
+
+select 
+	product_name,
+	total_sales 
+from sales 
+where rnk <= 3
+
+union all 
+
+select 
+	'Other' as product_name, 
+	sum(amount) as total_sales 
+from sales 
+where rnk > 3
+
+
+/* Top 5 cities by population + "Others" 
+Return a list showing the total population for the top 5 most popular citites, and group the remaining citites 
+into a single row labeled "Other". 
+
+table: city_population
+city_name, population 
+*/ 
+
+with ranked_cities as (
+	select 
+		city_name, 
+		population,
+		row_number() over(order by population desc) as rnk 
+	from city_population 
+)
+
+select 
+	city_name,
+	population 
+from ranked_cities 
+where rnk <= 5
+
+union all 
+
+select 
+	'Other' as city_name, 
+	sum(population) as population
+from ranked_cities 
+where rnk > 5
+
+/* Daily running total of sales 
+Write a query to calculate the cumulative (running) total of sales by date. Order the result by sale_date 
+
+daily_sales 
+sale_date, amount 
+*/ 
+
+select 
+	sale_date, 
+	amount,
+	sum(amount) over(order by sale_date) as running_total
+from daily_sales 
+order by sale_date 
+
+/* Cumulative spending per user 
+For each user, calculate the running total of their spending ordered by purchase date. 
+Return user_id, purchase_date, amount, and the running_total 
+
+user_purchases 
+user_id, purchase_date, amount 
+*/
+
+select 
+	user_id,
+	purchase_date,
+	amount,
+	sum(amount) over(partition by user_id order by purchase_date) as running_total 
+from user_purchases 
+order by user_id, purchase_date 
+
+/* Rolling 7-day sales (sliding windows) 
+For each date, calculate the total sales in the last 7 days, including the current day. 
+
+daily_sales 
+sale_date, amount
+*/ 
+
+select 
+	sale_date,
+	sum(amount) over(
+		order by sale_date 
+		rows between 6 preceding and current row) as rolling_7_day_sales 
+from daily_sales
+order by sale_date 
+
+/* Running average spending per user 
+For each user, compute their average spending over time, ordered by purchase_date
+
+user_purchases
+user_id, purchase_date, amount 
+*/
+
+select 
+	user_id,
+	purchase_date,
+	amount,
+	avg(amount) over(partition by user_id order by purchase_date) as avg_running
+from user_purchases
+order by user_id, purchase_date 
+
+/* Percentile rank of sales by day 
+For each day, show the percentile rank of its sales amount compared to all other days. 
+
+daily_sales
+sale_date, amount 
+*/ 
+
+select 
+	sale_date,
+	amount,
+	percent_rank() over(order by amount) as percentile_rank  --percent_rank() does not take any arguments 
+from daily_sales
+order by sale_date, amount 
+
+/* Difference from previous value (daily change) 
+For each date, calculate the change in sales compared to the previous day. 
+
+daily_sales
+sale_date, amount 
+*/ 
+
+select 
+	sale_date,
+	amount, 
+	amount - lag(amount) over(order by sale_date) as change_vs_previous_day 
+from daily_sales 
+order by sale_date 
