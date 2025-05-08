@@ -2907,3 +2907,123 @@ select
 	amount - lag(amount) over(order by sale_date) as change_vs_previous_day 
 from daily_sales 
 order by sale_date 
+
+-- type pf problem: Nth Highest / Lowest 
+
+/* 3rd highest product sale 
+Find the product_id and amount of the 3rd highest sale overall. If there are ties, return the 3rd distinct amount. 
+
+sales 
+product_id, sale_date, amount 
+*/ 
+
+with ranked_sales as(
+	select 
+		product_id,
+		amount,
+		rank() over(order by amount desc) as rnk --use of RANK() for distinct logic 
+	from sales 
+)
+select 
+	product_id, 
+	amount
+from ranked_sales 
+where rnk = 3
+
+/* 2nd lowest salary per department 
+For each department, find the employee(s) who have the 2nd lowest distinct salary 
+
+employee_salaries 
+employee_id, department_id, salary
+*/ 
+
+with ranked_salaries as(
+	select 
+		department_id,
+		employee_id,
+		salary,
+		rank() over(partition by department_id order by salary) as rnk --use of RANK() for distinct logic, so if 2 employees have the lowest salary their unique salary is ranked 2
+	from employee_salaries 
+)
+
+select 
+	department_id,
+	employee_id
+from ranked_salaries 
+where rnk = 2
+
+/* Nth most recent login
+Find the 3rd most recent login time for each user 
+
+user_logins 
+user_id, login_time
+*/ 
+
+with ranked_logins as (
+	select 
+		user_id,
+		login_time,
+		row_number() over(partition by user_id order by login_time desc) as rnk 
+	from user_logins 
+)
+select 
+	user_id,
+	login_time 
+from ranked_logins 
+where rnk = 3
+
+-- Common type: Percent of total (ratio to total) 
+-- CType: Calculating how each value compares to a grand/group total.
+
+/* Product sales as % of total sales 
+For each product, calculate what percentage of total sales it contributes. 
+
+sales 
+product_id, amount 
+*/ 
+select 
+	product_id, 
+	--amount, 
+	--sum(amount) over() as total_sales ,
+	100.0 * amount / (sum(amount) over()) as percentage_of_total_sales
+from sales 
+order by percentage_of_total_sales desc 
+
+
+/* Department headcount share (!)
+Compute what percentage of the company's total employees are in each department. 
+
+employees
+employee_id, department_id 
+*/ 
+
+WITH dept_counts AS (
+    SELECT 
+        department_id,
+        COUNT(DISTINCT employee_id) AS dept_employee_count
+    FROM employees
+    GROUP BY department_id
+),
+total_count AS (
+    SELECT COUNT(DISTINCT employee_id) AS total_employee_count
+    FROM employees
+)
+
+SELECT 
+    d.department_id,
+    ROUND(100.0 * d.dept_employee_count / t.total_employee_count, 2) AS percentage_of_total_employees
+FROM dept_counts d
+CROSS JOIN total_count t --attaching total_count value to every department row, because it has only one column 
+
+
+/* Country share of global population 
+Show each country's percentage of total world population, rounded to 2 decimal points 
+
+countries 
+country_name, population 
+*/ 
+
+select 
+	country_name, 
+	round(100.0 * (population / (sum(population) over())),2) as percentage_of_total_population 
+from countries 
