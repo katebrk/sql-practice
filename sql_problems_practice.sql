@@ -3027,3 +3027,122 @@ select
 	country_name, 
 	round(100.0 * (population / (sum(population) over())),2) as percentage_of_total_population 
 from countries 
+
+
+
+
+
+/* Alfa bank examples 
+
+3 таблицы: 
+
+t1: users
+user_id, created_at, country, registration_platform, channel_by_trail
+
+t2: users_actions
+user_id, action_id 
+
+t3: actions
+action_id, action_type (view_offer, apply_loan,... ), success_type, seconds_from_last_action, created_at 
+*/ 
+
+--Problem 1: посчитать кол-во всех действий каждого пользователя и кол-во успешных
+
+-- using FILTER 
+select 
+	ua.user_id,
+	count(distinct ua.action_id) as actions_count,
+	count(a.action_id) filter(where a.success_type = true) as successful_actions
+from user_actions ua
+left join actions a on ua.action_id = a.action_id 
+group by ua.user_id 
+order by ua.user_id 
+
+--using CASE WHEN
+select 
+	ua.user_id,
+	count(distinct ua.action_id) as actions_count,
+	count(case when a.success_type = true then 1 end) as successful_actions
+from user_actions ua
+left join actions a on ua.action_id = a.action_id 
+group by ua.user_id 
+order by ua.user_id 
+
+-- Problem 2: для каждого пользователя необходимо посчитать целое среднее время (в секундах) между действиями, 
+-- если таких действий больше одного 
+
+user_id, avg_time_in_seconds_between_actions (if count actions>1) 
+
+select
+	ua.user_id, 
+	round(avg(a.seconds_from_last_action)) as avg_seconds_from_last_action
+from users_actions ua 
+join actions a on ua.action_id = a.action_id 
+where a.seconds_from_last_action is not null --фильтруем только где значения не null
+group by ua.user_id 
+order by ua.user_id 
+
+-- Problem 3 (!): найти пользователей, которые успешно подали заявку (apply_loan), 
+-- но у них не было успешного просмотра оффера (view_offer) до этого
+
+-- using NOT EXISTS 
+SELECT DISTINCT ua.user_id 
+FROM user_actions ua 
+JOIN actions a ON ua.action_id = a.action_id 
+WHERE a.action_type = 'apply_loan' 
+  AND a.success_type = TRUE 
+  AND NOT EXISTS ( --check that no earlier successful view_offers existed 
+    SELECT 1
+    FROM user_actions ua2
+    JOIN actions a2 ON ua2.action_id = a2.action_id 
+    WHERE ua2.user_id = ua.user_id 
+      AND a2.action_type = 'view_offer'
+      AND a2.success_type = TRUE 
+      AND a2.created_at < a.created_at
+)
+
+-- using CTE 
+WITH successful_applies AS (
+    SELECT 
+		ua.user_id, 
+		a.created_at AS apply_time
+    FROM user_actions ua
+    JOIN actions a ON ua.action_id = a.action_id
+    WHERE a.action_type = 'apply_loan' AND a.success_type = TRUE
+),
+successful_views AS (
+    SELECT 
+		ua.user_id, 
+		a.created_at AS view_time
+    FROM user_actions ua
+    JOIN actions a ON ua.action_id = a.action_id
+    WHERE a.action_type = 'view_offer' AND a.success_type = TRUE
+)
+SELECT 
+	sa.user_id
+FROM successful_applies sa
+LEFT JOIN successful_views sv
+  ON sa.user_id = sv.user_id 
+  AND sv.view_time < sa.apply_time --only earlier views, if no earlier views exist this will return null on sv side 
+WHERE sv.user_id IS NULL --no matching earlier views were found 
+
+-- Problem 4: для каждого канала привлечения (channel_by_trail) нужно посчитать кол-во пользователей, 
+-- сделавших хотя бы одно успешное действие и среднее кол-во успешных действий на пользователя
+
+with successful_actions_by_user as(
+	select 
+		ua.user_id,
+		count(a.action_id) as success_actions_count 
+	from users_actions ua 
+	join actions a on ua.action_id = a.action_id 
+	where a.success_type is true
+	group by ua.user_id 
+)
+
+select 
+	u.channel_by_trail,
+	count(distinct sau.user_id) as users_with_success_count,
+	round(avg(sau.success_actions_count),2) as avg_success_per_user 
+from successful_actions_by_user sau
+join users u on u.user_id = sau.user_id
+group by u.channel_by_trail
