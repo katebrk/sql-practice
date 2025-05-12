@@ -3032,9 +3032,9 @@ from countries
 
 
 
-/* Alfa bank examples 
+/* Alfa Bank sample questions 
 
-3 таблицы: 
+3 tables: 
 
 t1: users
 user_id, created_at, country, registration_platform, channel_by_trail
@@ -3126,7 +3126,7 @@ LEFT JOIN successful_views sv
   AND sv.view_time < sa.apply_time --only earlier views, if no earlier views exist this will return null on sv side 
 WHERE sv.user_id IS NULL --no matching earlier views were found 
 
--- Problem 4: для каждого канала привлечения (channel_by_trail) нужно посчитать кол-во пользователей, 
+-- Problem 4 (!): для каждого канала привлечения (channel_by_trail) нужно посчитать кол-во пользователей, 
 -- сделавших хотя бы одно успешное действие и среднее кол-во успешных действий на пользователя
 
 with successful_actions_by_user as(
@@ -3146,3 +3146,117 @@ select
 from successful_actions_by_user sau
 join users u on u.user_id = sau.user_id
 group by u.channel_by_trail
+
+
+-- Common type: Last Value / Previous Row
+-- CType: LAG() / LEAD() / Accessing neighboring rows for comparisons
+
+/* Problem 1: Previous order amount 
+
+Table: orders (order_id, customer_id, order_date, amount)
+
+Task:
+For each order, show the previous order amount placed by the same customer (if any).
+*/ 
+
+select 
+	order_id,
+	amount,
+	lag(amount) over(partition by customer_id order by order_date) as previous_amount
+from orders 
+
+/* Problem 2: Time Between Logins
+Table: user_logins (user_id, login_time)
+
+Task:
+For each login, calculate the time difference (in days) between the current login and the previous login by the same user.
+*/ 
+
+select 
+	user_id,
+	login_time,
+	login_time - lag(login_time) over(partition by user_id order by login_time) as diff_between_current_and_previous_login --if supports datetime substractions (like in postgrwesql)
+	-- if not supports datetime substractions: 
+	-- DATEDIFF(login_time, LAG(login_time) OVER(PARTITION BY user_id ORDER BY login_time)) AS days_since_last_login
+from user_logins 
+
+
+/* Problem 3: Price Change Compared to Next Product
+Table: products (product_id, price)
+
+Task:
+For each product, show the price difference compared to the next product in ascending price order.
+*/
+
+select 
+	product_id,
+	price - lead(price) over(order by price asc) as price_diff_with_next_product
+from products
+
+
+-- Common type: Time Between Events
+-- CType: DATEDIFF, LAG/LEAD, timestamp subtraction — typically using window functions to compute time elapsed 
+-- between events like logins, purchases, or status changes.
+
+/* Problem 1: Days Between Purchases
+Table: purchases (user_id, purchase_date)
+
+For each purchase, calculate the number of days since the previous purchase by the same user.
+*/ 
+
+select 
+	user_id,
+	purchase_date, 
+	purchase_date - lag(purchase_date) over(partition by user_id order by purchase_date) as days_from_previous_purchase
+	-- or: DATEDIFF(purchase_date, lag(purchase_date) over(partition by user_id order by purchase_date)) as days_from_previous_purchase
+from purchases 
+
+/* Problem 2: Time Since Last Status Change
+Table: account_status_log (user_id, status, change_time)
+For each status change, compute the duration in hours since the previous status change for that user.
+*/
+
+-- for PostgreSQL 
+select 
+	user_id,
+	status,
+	change_time,
+	extract(epoch from (change_time - lag(change_time) over(partition by user_id order by change_time))) 
+		/ 60 / 60  as prev_change_time 
+from account_status_log
+
+-- for SQL Server using DATEDIFF
+SELECT 
+    user_id,
+    status,
+    change_time,
+    DATEDIFF(
+        HOUR, 
+        LAG(change_time) OVER(PARTITION BY user_id ORDER BY change_time), 
+        change_time
+    ) AS prev_change_time
+FROM account_status_log;
+
+
+/* Problem 3: Time Until Next Game Session
+Table: game_sessions (player_id, session_start)
+For each session, compute the gap in minutes between the current session start and the next session for the same player.
+*/ 
+
+-- for PostgreSQL 
+select 
+	player_id,
+	session_start,
+	extract(epoch from lead(session_start) over(partition by player_id order by session_start) - session_start) / 60 as gap 
+from game_sessions 
+
+-- for SQL Server
+select 
+	player_id,
+	session_start,
+	DATEDIFF(
+		MINUTE, 
+		session_start,
+		lead(session_start) over(partition by player_id order by session_start)		
+	) as gap
+from game_sessions 
