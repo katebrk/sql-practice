@@ -3260,3 +3260,79 @@ select
 		lead(session_start) over(partition by player_id order by session_start)		
 	) as gap
 from game_sessions 
+
+
+-- Common type: 7. Self Join / Find Pairs
+-- CType: Self join or pairs matching, to compare rows within the same table — often for finding related pairs, events, or gaps.
+
+/* (!) Problem 1: Users Who Refer Each Other
+Table: user_referrals (user_id, referred_user_id)
+
+Find all pairs of users who referred each other.
+*/
+
+select 
+	u1.user_id as user_a,
+	u1.user_id as user_b 
+from user_referrals u1 
+join user_referrals u2 
+	on u1.user_id = u2.referred_user_id
+	and u1.referred_user_id = u2.user_id 
+where u1.user_id < u1.referred_user_id  -- to avoid duplicate (A,B) and (B,A) 
+
+
+/* (!) Problem 2: Overlapping Events
+Table: events (event_id, start_time, end_time)
+
+Find all pairs of events that overlap in time. (i.e., their time ranges intersect)
+*/
+
+select 
+	e1.event_id as event_1,
+	e2.event_id as event_2
+from events e1 
+join events e2 --join the events table to itself to compare each event with every other event.
+	on e1.event_id < e2.event_id -- to avoid self-pairs and duplicates 
+	and e1.start_time <= e2.end_time -- ensures that event_1 starts before event_2 ends
+	and e2.start_time <= e1.end_time -- ensures that event_2 starts before event_1 ends 
+
+
+-- Common type: 8. Group-Wise Maximum / Latest per Group
+-- CType: Pick the row with the maximum or most recent value per group (e.g., latest order per user).
+
+/* Problem 1: Latest Order Per Customer
+Table: orders (order_id, customer_id, order_date, total_amount)
+
+Task:
+Find the most recent order for each customer.
+*/ 
+
+with ranked_orders as(
+	select 
+		order_id,
+		customer_id,
+		order_date,
+		amount,
+		row_number() over(partition by customer_id order by order_date desc) as rnk 
+	from orders
+)
+
+select order_id, customer_id
+from ranked_orders
+where rnk = 1
+
+/* Problem 4: Highest Salary Per Department
+Table: employees (employee_id, department_id, salary)
+
+Return the employee with the highest salary in each department.
+*/ 
+
+with ranked_employees as(
+	select *, 
+		rank() over(partition by department_id order by salary desc) as rnk 
+	from employees
+)
+
+select employee_id
+from ranked_employees
+where rnk = 1
