@@ -3336,3 +3336,103 @@ with ranked_employees as(
 select employee_id
 from ranked_employees
 where rnk = 1
+
+
+-- Self join 
+
+/* Q1. 
+Find services (i.e., bus numbers and companies) that go directly from Craiglockhart to London Road, 
+without requiring a change of service.
+
+2 tables: 
+stops(id, name)
+route(num, company, pos, stop) — this tells us which services go to which stops, and in what position (order) on the route.
+*/ 
+
+SELECT 
+   a.company,
+   a.num,
+   stops_a.name,
+   stops_b.name
+from route as a 
+join route as b on a.num=b.num and a.company=b.company
+join stops as stops_a on a.stop=stops_a.id
+join stops as stops_b on b.stop=stops_b.id
+where stops_a.name='Craiglockhart' 
+   and stops_b.name='London Road'
+order by a.num
+
+/* Q2. 
+Give list of services which connects stops 115 and 137 
+
+2 tables: 
+stops(id, name)
+route(num, company, pos, stop) — this tells us which services go to which stops, and in what position (order) on the route.
+*/ 
+
+select distinct
+   a.company,
+   a.num
+from route as a
+join route as b on a.num=b.num and a.company=b.company
+where a.stop=115 and b.stop=137
+
+/* Q3. 
+Give list of services which connects stops 'Craiglockhart' and 'Tollcross'
+*/ 
+
+select 
+   a.company,
+   a.num
+from route as a 
+join route as b on a.num=b.num and a.company=b.company
+join stops as stopa on stopa.id=a.stop
+join stops as stopb on stopb.id=b.stop
+where stopa.name='Craiglockhart'
+and stopb.name='Tollcross'
+
+/* Q4 
+Give a distinct list of the stops which may be reached from 'Craiglockhart' by taking one bus, including 'Craiglockhart' itself, 
+offered by the LRT company. Include the company and bus no. of the relevant services.
+*/ 
+
+select distinct
+   stopb.name,
+   a.company,
+   a.num
+from route as a
+join route as b on a.num=b.num and a.company=b.company
+join stops as stopa on stopa.id=a.stop
+join stops as stopb on stopb.id=b.stop
+where a.company='LRT'
+and stopa.name='Craiglockhart'
+
+/* (!) Q5. 
+Find two-bus routes that go from Craiglockhart to Lochend, where:
+- The first bus takes you from Craiglockhart to a transfer stop.
+- The second bus takes you from the same transfer stop to Lochend.
+
+We need to return:
+- First bus number and company
+- Name of the transfer stop
+- Second bus number and company
+*/ 
+
+SELECT DISTINCT
+  r1.num AS num,
+  r1.company AS company,
+  s_transfer.name AS name,
+  r2.num AS num,
+  r2.company AS company
+FROM route r1
+JOIN route r1_dest ON r1.num = r1_dest.num AND r1.company = r1_dest.company
+JOIN stops s1 ON r1.stop = s1.id
+JOIN stops s_transfer ON r1_dest.stop = s_transfer.id
+
+JOIN route r2 ON s_transfer.id = r2.stop
+JOIN route r2_dest ON r2.num = r2_dest.num AND r2.company = r2_dest.company
+JOIN stops s2_dest ON r2_dest.stop = s2_dest.id
+
+WHERE s1.name = 'Craiglockhart'
+  AND s2_dest.name = 'Lochend'
+  AND r1_dest.stop = r2.stop
