@@ -3436,3 +3436,184 @@ JOIN stops s2_dest ON r2_dest.stop = s2_dest.id
 WHERE s1.name = 'Craiglockhart'
   AND s2_dest.name = 'Lochend'
   AND r1_dest.stop = r2.stop
+  
+  
+ 
+ /*
+ Find total sales amount per customer who made more than 2 purchases. 
+ Include only customers whose total sales > 500 
+ 
+ Tables: 
+ customers (customer_id, customer_name)
+ orders (order_id, customer_id, order_date, total_amount) 
+ 
+ Expected output: customer_name, total_orders, total_sales  
+ */ 
+ 
+ with cte as(
+ select 
+	customer_id,
+	count(order_id) as total_orders,
+	sum(total_amount) as total_sales 
+ from orders 
+ group by customer_id
+ having count(order_id) > 2
+	and sum(total_sales) > 500
+ )
+ 
+ select 
+	c.customer_name,
+	cte.total_orders,
+	cte.total_sales 
+ from cte 
+ join customers c on c.customer_id = cte.customer_id 
+ 
+
+ /* 
+ For each product, find the most recent order it was included in, 
+ and calculate how many times each product has been sold in total (# of orders) 
+ 
+ products (product_id, product_name)
+ order_items (order_item_id, order_id, product_id, quantity, price_per_unit)
+ orders (order_id, customer_id, order_date, total_amount) 
+ 
+ output: 
+ product_id, product_name, most_recent_order_id, most_recent_order_date, total_orders 
+ */ 
+ 
+ with ranked_orders as (
+ select 
+	p.product_id,
+	p.product_name,
+	o.order_id,
+	o.order_date,
+	row_number() over(partition by p.product_id order by o.order_date desc) as rnk,
+	count(distinct o.order_id) over(partition by p.product_id) as total_orders
+ from products p 
+ left join order_items oi on oi.product_id = p.product_id
+ left join orders o on o.order_id = oi.order_id
+ )
+ 
+ select 
+	product_id,
+	product_name,
+	order_id as most_recent_order_id,
+	order_date as most_recent_order_id,
+	total_orders
+from ranked_orders 
+where rnk=1
+ 
+
+/* 
+For each customer, show their order history including:
+- total amount of the current order
+- total amount of the previous order
+- total amount of the next order 
+
+orders (order_id, customer_id, order_date, total_amount) 
+
+output: 
+customer_id, order_id, order_date, total_amount, prev_order_amount, next_order_amount 
+*/ 
+
+select 
+	customer_id,
+	order_id, 
+	order_date,
+	total_amount,
+	lag(total_amount) over(partition by customer_id order by order_date, order_id) as prev_order_amount, --order by ORDER_ID in case sales in the same date 
+	lead(total_amount) over(partition by customer_id order by order_date, order_id) as next_order_amount
+from orders 
+
+/* 
+Analyze the total transaction amounts of customers and identify those with high spending. Find customers who spent more than $500 in total. 
+Sort by total_amount in desc order. 
+Expected output: customer_name, total_amount, count_transactions 
+
+Tables: 
+transactions (transaction_id, customer_id, amount, transaction_date)
+customers (customer_id, customer_name) 
+*/
+
+select 
+	c.customer_name,
+	sum(t.amount) as total_amount,
+	count(distinct t.transaction_id) as count_transactions 
+from transactions t 
+join customers c on c.customer_id = t.customer_id
+group by c.customer_id, c.customer_name --multiple non-aggregated columns not functionally dependent on each other
+having sum(t.amount)>500
+
+/* 
+Identify the latest transaction made by each customer. Return each customer_name, transaction_id, 
+transaction_date, most_recent_amount for each customer 
+
+Tables: 
+transactions (transaction_id, customer_id, amount, transaction_date)
+customers (customer_id, customer_name)
+*/
+
+with ranked_transactions as( 
+select 
+	t.customer_id, 
+	t.transaction_id, 
+	t.transaction_date,
+	t.amount, 
+	row_number() over(partition by t.customer_id order by t.transaction_date desc, t.transaction_id desc) as rn 
+from transactions t 
+)
+
+select 
+	c.customer_name, 
+	rt.transaction_id,
+	rt.transaction_date,
+	rt.amount as most_recent_amount
+from ranked_transactions rt 
+join customers c on rt.customer_id = c.customer_id 
+where rt.rn=1
+
+/* 
+Identify customers who made transactions in consecutive months. 
+Find customer_id, transaction_month, next_transaction_month 
+
+transactions (transaction_id, customer_id, amount, transaction_date)
+*/
+
+-- PostgreSQL, with INTERVAL 
+WITH customer_by_month AS (
+  SELECT 
+    customer_id,
+    DATE_TRUNC('month', transaction_date) AS transaction_month,
+    LEAD(DATE_TRUNC('month', transaction_date)) OVER (
+      PARTITION BY customer_id 
+      ORDER BY DATE_TRUNC('month', transaction_date)
+    ) AS next_transaction_month
+  FROM transactions
+  GROUP BY customer_id, DATE_TRUNC('month', transaction_date)
+)
+SELECT 
+  customer_id,
+  transaction_month,
+  next_transaction_month
+FROM customer_by_month
+WHERE next_transaction_month = transaction_month + INTERVAL '1 month'
+
+-- SQL Server, with DATEDIFF
+WITH customer_by_month AS (
+  SELECT 
+    customer_id, 
+    FORMAT(transaction_date, 'yyyy-MM') AS transaction_month,
+    FORMAT(LEAD(transaction_date) OVER (PARTITION BY customer_id ORDER BY transaction_date), 'yyyy-MM') AS next_transaction_month,
+    DATEDIFF(
+      month, 
+      transaction_date,
+      LEAD(transaction_date) OVER (PARTITION BY customer_id ORDER BY transaction_date)
+	) AS gap_months
+  FROM transactions
+)
+SELECT 
+  customer_id, 
+  transaction_month,
+  next_transaction_month
+FROM customer_by_month 
+WHERE gap_months = 1
