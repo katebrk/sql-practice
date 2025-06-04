@@ -3617,3 +3617,85 @@ SELECT
   next_transaction_month
 FROM customer_by_month 
 WHERE gap_months = 1
+
+
+/* Stored procedure 
+
+Create a report for the restructuring showing:
+The latest status and outstanding loan balance for each deal under restructuring, grouped by deal manager.
+
+Deals
+(DealID, DealName, ManagerID, Status, IsRestructuring)
+
+LoanBalances
+(DealID, OutstandingAmount, AsOfDate)
+
+Managers
+(ManagerID, ManagerName)
+*/
+
+CREATE PROCEDURE GetStatusReport
+	@ManagerName NVARCHAR(100)
+AS 
+BEGIN 
+	with ranked_loan_balances as (
+	select 
+		DealID, 
+		OutstandingAmount,
+		AsOfDate,
+		row_number() over(partition by DealID order by AsOfDate desc) as rn
+	from LoanBalances 
+	)
+
+	select 
+		m.ManagerName,
+		d.DealName, 
+		d.status,
+		lb.OutstandingAmount,
+		lb.AsOfDate
+	from Deals d 
+	join ranked_loan_balances lb on lb.dealid = d.dealid
+	join Managers m on m.managerID = d.managerID
+	where d.IsRestructuring = 1
+		and lb.rn = 1
+		and m.ManagerName = @ManagerName
+	order by d.DealName
+END;
+
+-- calling it: 
+EXEC GetStatusReport @ManagerName = 'Ivan Bobrov'
+
+
+/* Creating VIEW
+Create standartized dataset that always shows the latest loan balance for each deal — no matter who is querying it (Power BI, Excel, etc.).
+
+Deals (DealID, DealName, Status, IsRestructuring)
+LoanBalances (DealID, OutstandingAmount, AsOfDate)
+Managers (ManagerID, ManagerName)
+*/
+
+CREATE VIEW vw_LatestBalances AS 
+with ranked_loan_balances as (
+select 
+	DealID, 
+	OutstandingAmount,
+	AsOfDate,
+	row_number() over(partition by DealID order by AsOfDate desc) as rn
+from LoanBalances 
+)
+	
+select 
+	d.DealID,
+	d.DealName, 
+	lb.OutstandingAmount,
+	lb.AsOfDate
+from Deals d 
+join ranked_loan_balances lb on lb.dealid = d.dealid and lb.rn=1
+where d.IsRestructuring = 1
+	--and lb.rn = 1
+order by d.DealID
+)
+
+-- to use a view:
+select *
+from vw_LatestBalances
