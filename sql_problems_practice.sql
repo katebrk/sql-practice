@@ -3818,3 +3818,115 @@ BEGIN
 	from employees 
 	where employee_id = @employee_id 
 END
+
+
+/*
+For each athlete, calculate cumulative number of events they have participated in.
+
+athletes (athlete_id, name, sport, country)
+events (event_id, athlete_id, event_date, event_name
+*/
+
+select 
+	a.name, 
+	e.event_date, 
+	count(e.event_id) as events_on_day,
+	sum(count(e.event_id)) over(partition by e.athlete_id order by e.event_date) as cumulative_events
+from events as e 
+join athletes as a on a.athlete_id = e.athlete_id
+group by a.athlete_id, a.name, e.event_date
+order by a.name, e.event_date;
+
+/*
+For each customer, find: 
+- average purchase value (total amount / total purchases)
+- the most recent purchase date for each Customer 
+- display the results ordered by average purchase value in desc order 
+
+customers (customer_id, signup_date, gender, age_group)
+purchases (purchase_id, customer_id, purchase_date, purchase_amount) 
+*/
+
+-- include only customers who made at least 1 purchase 
+select 
+	c.customer_id, 
+	c.signup_date,
+	c.gender,
+	c.age_group,
+	sum(p.purchase_amount) / count(p.purchase_id) as avg_purchase_value,
+	max(p.purchase_date) as the_latest_purchase_date 
+from purchases as p
+join customers as c on c.customer_id = p.customer_id 
+group by c.customer_id, c.signup_date, c.gender, c.age_group
+order by avg_purchase_value desc
+
+-- include all customers, even if they made 0 purchases + handling dividing by zero error with CASE WHEN
+select 
+	c.customer_id, 
+	c.signup_date,
+	c.gender,
+	c.age_group,
+	case 
+		when count(p.purchase_id) = 0 then 0
+		else sum(p.purchase_amount) / count(p.purchase_id) 
+	end as avg_purchase_value,
+	max(p.purchase_date) as the_latest_purchase_date 
+from customers as c 
+left join purchases as p on p.customer_id = c.customer_id
+group by c.customer_id, c.signup_date, c.gender, c.age_group
+order by avg_purchase_value desc
+
+/*
+Tables: 
+
+customers (
+  customer_id INT,
+  signup_date DATE,
+  gender VARCHAR,
+  age_group VARCHAR
+)
+
+purchases (
+  purchase_id INT,
+  customer_id INT,
+  purchase_date DATE,
+  purchase_amount DECIMAL
+)
+
+For each customer, calculate the following metrics:
+- total_purchases: Total number of purchases made
+- total_spent: Total amount spent
+- first_purchase_date: The date of the customer's first purchase
+- days_since_last_purchase: Days between today (assume '2025-06-09') and their most recent purchase
+- avg_spend_per_month: Average amount the customer spends per month, calculated between their first and last purchase dates (inclusive).
+- Include all customers, even those who have never made a purchase
+- Order results by total_spent descending
+- Also add a column called loyalty_segment: 
+	'High' if total_spent > 1000, 
+	'Medium' if total_spent between 500 and 1000, 
+	'Low' otherwise
+*/
+
+select 
+	c.customer,
+	count(p.purchase_id) as total_purchases,
+	sum(p.purchase_amount) as total_spent,
+	min(p.purchase_date) as first_purchase_date,
+	DATEDIFF(
+		DAY,
+		MAX(p.purchase_date),
+		'2025-06-09'		
+	) AS days_since_last_purchase, 
+	sum(p.purchase_amount) /    
+		CASE WHEN MIN(p.purchase_date) IS NULL THEN NULL  --if no purchases
+		ELSE DATEDIFF(MONTH, MIN(p.purchase_date), MAX(p.purchase_date)) + 1 --inclusive 
+	end as avg_spend_per_month,
+	case 
+		when sum(p.purchase_amount)>1000 then 'High' 
+		when sum(p.purchase_amount)>=500 and sum(p.purchase_amount)<=1000 then 'Medium'
+		else 'Low'
+	end as loyalty_segment
+from customers as c 
+left join purchases as p on c.customer_id = p.customer_id 
+group by c.customer_id 
+order by total_spent desc; 
