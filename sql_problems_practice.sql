@@ -3699,3 +3699,122 @@ order by d.DealID
 -- to use a view:
 select *
 from vw_LatestBalances
+
+
+/*
+Calculate moving average revenue over 7 days for each product 
+
+transactions
+	(transaction_id INT,
+	product_id INT,
+	date VARCHAR,
+	revenue INT)
+	
+expected output: 
+product_id, date, moving_avg_revenue 
+*/
+
+with aggregated_transactions as( 
+select 
+	product_id, 
+	date, 
+	sum(revenue) as total_revenue 
+from transactions 
+group by product_id, date 
+--order by product_id, date
+) 
+
+select 
+	product_id, 
+	date, 
+	avg(total_revenue) over(
+		partition by product_id 
+		order by date 
+		rows between 6 preceding and current row
+	) as moving_avg_revenue 
+from aggregated_transactions
+
+
+
+
+/*
+person (person_id, last_name, first_name) 
+address (address_id, person_id, city, state) 
+
+output: first_name, last_name, city, state
+*/
+
+select 
+	p.first_name,
+	p.last_name,
+	a.city,
+	a.state 
+from person as p 
+left join address as a on p.person_id = a.person_id
+
+
+
+/*
+Find all customers who bought all the products in the products table 
+
+customers (customer_id, product_id) -- exists duplicates, cust_id is not NULL 
+products (product_id) 
+
+expected output: customer_id 
+*/
+-- 1st option 
+-- step 1: calculate all products 
+with all_products as(
+select 
+	count(product_id) as all_products 
+from products 
+), 
+-- step 2: calculate # of distinct products bought by all customers 
+products_by_customers as(
+select 
+	customer_id,
+	count(distinct product_id) as count_products
+from customers 
+group by customer_id 
+) 
+-- step 3: cross joining both tables and filter 
+select customer_id 
+from products_by_customers as c
+cross join all_products as p
+where c.count_products=p.all_products
+order by customer_id 
+
+
+-- 2nd option
+select customer_id
+from customers 
+group by customer_id 
+having count(distinct product_id) 
+	= (select count(product_id) from products)
+	
+	
+/* 
+rating A = 20% of current Salary
+rating B = 10% 
+rating C and below = no bonus 
+
+Write procedure AllocateBonus, that accepts @employee_id as INT, output @bonus_amount as DECIMAL (10, 2)
+Calculate the bonus amount 
+
+Tables: 
+employees (employee_id, full_name, salary, rating)
+*/ 
+
+CREATE PROCEDURE 
+	@employee_id INT,
+	@bonus DECIMAL (10,2) OUTPUT 
+AS
+BEGIN 
+	select 
+		case when rating = 'A' then (0.2 * salary) 
+			when rating = 'B' then (0.1 * salary) 
+			else 0
+		end as bonus 
+	from employees 
+	where employee_id = @employee_id 
+END
