@@ -3930,3 +3930,150 @@ from customers as c
 left join purchases as p on c.customer_id = p.customer_id 
 group by c.customer_id 
 order by total_spent desc; 
+
+
+/* Top Retention Customers Over Time
+
+Customers(customer_id, name, signup_date)
+Orders(order_id, customer_id, order_date, amount)
+order_items(order_id, product_id, quantity, unit_price)
+Products(product_id, name, category, price)
+
+Find top 3 customers (by total revenue) in each month of 2024 who also placed orders in the previous month (i.e., returning customers).
+Add a column showing the number of categories the customer bought from that month.
+*/ 
+
+with customers_monthly as (
+	select 
+		o.customer_id,
+		date_trunc('month', o.order_date) as month, 
+		sum(o.amount) as total_amount,
+		count(distinct p.category) as count_category, 
+		lag(date_trunc('month', o.order_date)) over(
+			partition by o.customer_id 
+			order by date_trunc('month', o.order_date)
+		) as previous_month
+	from orders o 
+	join order_items oi on oi.order_id = o.order_id
+	join products p on p.product_id=oi.product_id
+	where order_date between '01-01-2024' and '12-31-2024' 
+	group by o.customer_id, date_trunc('month', o.order_date) 
+),
+ranked_customers as (
+	select 
+		customer_id,
+		month,
+		total_amount,
+		count_category, 
+		previous_month,
+		rank() over(partition by month order by total_amount desc) as rank 
+	from customers_monthly
+)
+select 
+	month,
+	customer_id,
+	total_amount,
+	count_category,
+	rank
+from ranked_customers
+where previous_month = month - interval '1 month'
+	and rank <= 3
+
+/* Employee Career Tracker
+
+Employees
+| Column        | Type | Description                     |
+| ------------- | ---- | ------------------------------- |
+| `employee_id` | INT  | Primary key                     |
+| `name`        | TEXT | Employee name                   |
+| `manager_id`  | INT  | Self-reference to `employee_id` |
+| `department`  | TEXT | Department name                 |
+| `start_date`  | DATE | When they joined                |
+| `end_date`    | DATE | When they left (nullable)       |
+
+Write a query that returns the current and previous department for each employee, including: 
+employee_id, name, current_department, previous_department, tenure_in_current_department (in months), manager_name.
+
+Only include employees who have changed departments at least once
+
+🧠 Hints:
+Use self-join to get manager name (e.manager_id = m.employee_id)
+Use LAG() to get previous department
+Use COALESCE(end_date, CURRENT_DATE) to calculate ongoing tenure
+Use ROW_NUMBER() to get the most recent record per employee
+*/
+--1
+WITH department_history AS (
+  SELECT 
+    employee_id,
+    name,
+    department AS current_department,
+    LAG(department) OVER (PARTITION BY employee_id ORDER BY start_date) AS previous_department,
+    start_date,
+    COALESCE(end_date, CURRENT_DATE) AS effective_end_date,
+    manager_id
+  FROM employees
+),
+filtered_transfers AS (
+  SELECT *
+  FROM department_history
+  WHERE previous_department IS NOT NULL
+    AND previous_department <> current_department
+),
+tenure_calculated AS (
+  SELECT 
+    *,
+    DATE_PART('month', AGE(effective_end_date, start_date)) AS tenure_in_current_department,
+    CASE 
+      WHEN current_department > previous_department THEN true
+      ELSE false
+    END AS promotion_flag
+  FROM filtered_transfers
+),
+with_manager AS (
+  SELECT 
+    t.employee_id,
+    t.name,
+    t.current_department,
+    t.previous_department,
+    t.tenure_in_current_department,
+    m.name AS manager_name,
+    t.promotion_flag
+  FROM tenure_calculated t
+  LEFT JOIN employees m ON t.manager_id = m.employee_id
+)
+SELECT *
+FROM with_manager
+ORDER BY employee_id, start_date DESC;
+
+--2
+WITH current_department AS (
+  SELECT 
+    employee_id,
+    name, 
+    manager_id, 
+    department AS current_department, 
+    DATEDIFF(month, start_date, CURRENT_DATE) AS tenure_in_current_department_months
+  FROM employees
+  WHERE end_date IS NULL
+),
+previous_department AS (
+  SELECT 
+    employee_id, 
+    department AS previous_department,
+    ROW_NUMBER() OVER(PARTITION BY employee_id ORDER BY end_date DESC) AS rank 
+  FROM employees
+  WHERE end_date IS NOT NULL
+)
+SELECT 
+  c.employee_id,
+  c.name,
+  c.current_department,
+  p.previous_department,
+  c.tenure_in_current_department_months, 
+  c.manager_id
+FROM current_department c
+LEFT JOIN previous_department p ON c.employee_id = p.employee_id AND p.rank = 1;
+
+
+
