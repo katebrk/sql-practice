@@ -94,3 +94,97 @@ left join calculated_unit_price cup
 	on mq.product_id = cup.product_id
 	and mq.market = cup.market
 	and mq.region = cup.region
+	
+	
+/* Project 2. Factors that Fuel Student Performance
+
+student_performance (hours_studied, attendance, extracurricular_activities, sleep_hours, tutoring_sessions, teacher_quality, exam_score) 
+
+1. Do more study hours and extracurricular activities lead to better scores? 
+Analyze how studying more than 10 hours per week, while also participating in extracurricular activities, impacts exam performance. 
+The output should include two columns: 
+1) hours_studied and 
+2) avg_exam_score. 
+Group and sort the results by hours_studied in descending order. 
+Save the query as avg_exam_score_by_study_and_extracurricular.
+*/ 
+
+SELECT 
+	hours_studied,
+	avg(exam_score) as avg_exam_score
+FROM student_performance
+where extracurricular_activities ilike 'Yes'
+	and hours_studied > 10
+group by hours_studied
+order by hours_studied desc
+limit 30
+
+/* 2. Is there a sweet spot for study hours? 
+Explore how different ranges of study hours impact exam performance by calculating the average exam score 
+for each study range. Categorize students into four groups based on hours studied per week: 1-5 hours, 6-10 hours, 
+11-15 hours, and 16+ hours. The output should contain two columns: 1) hours_studied_range and 2) avg_exam_score. 
+Group the results by hours_studied_range and sort them by avg_exam_score in descending order.
+*/ 
+
+select 
+	case 
+		when hours_studied >= 1 and hours_studied <= 5 then '1-5 hours'
+		when hours_studied >= 6 and hours_studied <= 10 then '6-10 hours'
+		when hours_studied >= 11 and hours_studied <= 15 then '11-15 hours'
+		when hours_studied >= 16 then '16+ hours'
+	end as hours_studied_range,
+	avg(exam_score) as avg_exam_score
+from student_performance
+group by hours_studied_range
+order by avg_exam_score desc
+
+/* 3. A teacher wants to show their students their relative rank in the class, without revealing their exam scores to each other. 
+Use a window function to assign ranks based on exam_score, ensuring that students with the same exam score share the same rank 
+and no ranks are skipped. Return the columns attendance, hours_studied, sleep_hours, tutoring_sessions, and exam_rank. 
+The students with the highest exam score should be at the top of the results, so order your query by exam_rank in ascending order. 
+Limit your query to 30 students.
+*/ 
+
+select 
+	attendance,
+	hours_studied, 
+	sleep_hours,
+	tutoring_sessions,
+	dense_rank() over(order by exam_score desc) as exam_rank
+from student_performance
+order by exam_rank
+limit 30
+
+/* Project 3. Analyzing Motorcycle Part Sales
+
+The board of directors wants to gain a better understanding of wholesale revenue by product line, 
+and how this varies month-to-month and across warehouses. You have been tasked with calculating net revenue for each product line 
+and grouping results by month and warehouse. 
+The results should be filtered so that only "Wholesale" orders are included.
+
+sales (order_number, date, warehouse, client_type, product_line, quantity, unit_price, total, payment, payment_fee) 
+
+Task. Find out how much "Wholesale" net revenue each product_line generated per month per warehouse in the dataset. Contain the following: 
+product_line, 
+month (displayed as 'June', 'July', and 'August'), 
+warehouse, 
+net_revenue (the sum of total minus the sum of payment_fee). 
+
+The results should be sorted by product_line and month, followed by net_revenue in descending order.
+*/ 
+
+select 
+	product_line,
+	case 
+		when date between '2021-06-01' and '2021-06-30' then 'June'
+		when date between '2021-07-01' and '2021-07-31' then 'July'
+		when date between '2021-08-01' and '2021-08-31' then 'August'
+	end as month, 
+	warehouse, 
+	sum(total) - sum(payment_fee) as net_revenue
+from sales 
+where client_type ilike 'Wholesale'
+group by product_line, month, warehouse
+
+
+
