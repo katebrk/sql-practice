@@ -186,5 +186,86 @@ from sales
 where client_type ilike 'Wholesale'
 group by product_line, month, warehouse
 
+/* Project 4. The world's oldest businesses
+
+businesses (business, year_founded, category_code, country_code) 
+new_businesses (business, year_founded, category_code, country_code) 
+countries (country_code, country, continent) 
+categories (category_code, category) 
+
+1. What is the oldest business on each continent? 
+Output: continent, country, business, and year_founded in any order.
+*/ 
+
+with ranked_businesses as (
+	select 
+		c.continent, 
+		c.country, 
+		b.business, 
+		b.year_founded,
+		row_number() over(partition by c.continent order by b.year_founded) as rnk_founded
+	from businesses b
+	join countries c on c.country_code = b.country_code 
+)
+select 
+	continent,
+	country,
+	business,
+	year_founded
+from ranked_businesses 
+where rnk_founded=1
+order by year_founded
+
+/* 2. How many countries per continent lack data on the oldest businesses? Does including new_businesses change this? 
+Count the number of countries per continent missing business data, including new_businesses; output: continent, countries_without_businesses.
+*/ 
+
+select 
+	c.continent, 
+	count(c.country_code) as count_missing
+from countries c
+left join businesses b on b.country_code=c.country_code
+left join new_businesses nb on nb.country_code=c.country_code
+where b.business is null and nb.business is null
+group by c.continent
+order by c.continent 
+
+/* 3. Which business categories are best suited to last many years, and on what continent are they? Output: continent, category, and year_founded, in that order.
+*/ 
+
+with businesses_ranked as (
+	select 
+		c.continent,
+		cat.category,
+		b.year_founded,
+		row_number() over(partition by c.continent, cat.category order by b.year_founded) as rnk_founded
+	from businesses b 
+	left join categories cat on cat.category_code=b.category_code
+	left join countries c on c.country_code=b.country_code
+)
+select 
+	continent,
+	category,
+	year_founded
+from businesses_ranked
+where rnk_founded=1
 
 
+
+/* Project 5. Analyzing industry carbon emissions 
+
+product_emissions (id, year, product_name, company, country, industry_group, carbon_footprint_pcf)
+
+Find the number of unique companies and their total carbon footprint PCF for each industry group, filtering for the most recent year in the database. 
+Output: industry_group, num_companies, total_industry_footprint, with the last column being rounded to one decimal place. 
+The results should be sorted by total_industry_footprint from highest to lowest values.
+*/ 
+
+SELECT 
+	industry_group,
+	count(distinct company) as num_companies,
+	round(sum(carbon_footprint_pcf), 1) as total_industry_footprint 
+FROM product_emissions
+where year = (select max(year) from product_emissions)
+group by industry_group
+order by total_industry_footprint desc
