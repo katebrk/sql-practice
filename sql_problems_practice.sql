@@ -4076,4 +4076,179 @@ FROM current_department c
 LEFT JOIN previous_department p ON c.employee_id = p.employee_id AND p.rank = 1;
 
 
+-- Leetcode
+/* 180. Table: Logs
 
++-------------+---------+
+| Column Name | Type    |
++-------------+---------+
+| id          | int     |
+| num         | varchar |
++-------------+---------+
+In SQL, id is the primary key for this table.
+id is an autoincrement column starting from 1.
+ 
+
+Find all numbers that appear at least three times consecutively.
+
+Return the result table in any order.
+
+The result format is in the following example.
+*/ 
+with combined_nums as(
+    select 
+        l1.id,
+        l1.num as first_num,
+        l2.num as second_num,
+        l3.num as third_num
+    from logs as l1
+    left join logs as l2 on l1.id = l2.id + 1
+    left join logs as l3 on l1.id = l3.id + 2
+)
+
+select 
+    distinct first_num as ConsecutiveNums 
+from combined_nums
+where first_num = second_num and second_num = third_num
+
+/* 550. Game play analysis IV
+
+Table: Activity
++--------------+---------+
+| Column Name  | Type    |
++--------------+---------+
+| player_id    | int     |
+| device_id    | int     |
+| event_date   | date    |
+| games_played | int     |
++--------------+---------+
+(player_id, event_date) is the primary key (combination of columns with unique values) of this table.
+This table shows the activity of players of some games.
+Each row is a record of a player who logged in and played a number of games (possibly 0) before logging out on someday using some device.
+
+Write a solution to report the fraction of players that logged in again on the day after the day they first logged in, 
+rounded to 2 decimal places. In other words, you need to determine the number of players who logged in on the day immediately 
+following their initial login, and divide it by the number of total players.
+*/ 
+
+-- 1 
+-- find each player's first login date
+with first_login as(
+    select 
+        player_id,
+        min(event_date) as first_login
+    from activity
+    group by player_id 
+)
+
+-- check if that player logged in next day and count how many met that condition 
+, next_day_logins as(
+    select 
+        count(distinct a.player_id) as users_logged_next_day
+    from activity a 
+    join first_login as fl on fl.player_id = a.player_id
+    where a.event_date = fl.first_login + interval '1 day'
+)
+
+select 
+    round(1.0 * users_logged_next_day / (select count(distinct player_id) from activity), 2) as fraction
+from next_day_logins
+
+-- 2 with cross joins 
+with logs_ranked as(
+    select 
+        player_id,
+        event_date,
+        lead(event_date) over(partition by player_id order by event_date) as next_event_date,
+        rank() over(partition by player_id order by event_date) as rnk 
+    from activity
+)
+
+, users_logged_next_day as(
+    select 
+        count(distinct player_id) as count_of_users_logged_next_day
+    from logs_ranked
+    where next_event_date = event_date + interval '1 day'
+        and rnk = 1
+)
+
+, all_users as(
+    select 
+        count(distinct player_id) as total_users
+    from logs_ranked
+)
+
+select 
+    round(1.0 * count_of_users_logged_next_day / total_users, 2) as fraction
+from all_users
+cross join users_logged_next_day
+
+
+/* 1097. Game Play Analysis V 
+
+Table: Activity
++--------------+---------+
+| Column Name  | Type    |
++--------------+---------+
+| player_id    | int     |
+| device_id    | int     |
+| event_date   | date    |
+| games_played | int     |
++--------------+---------+
+(player_id, event_date) is the primary key (combination of columns with unique values) of this table.
+This table shows the activity of players of some games.
+Each row is a record of a player who logged in and played a number of games (possibly 0) before logging out on someday using some device.
+ 
+The install date of a player is the first login day of that player.
+We define day one retention of some date x to be the number of players whose install date is x and they logged back in on the day right after x, divided by the number of players whose install date is x, rounded to 2 decimal places.
+Write a solution to report for each install date, the number of players that installed the game on that day, and the day one retention.
+Return the result table in any order.
+The result format is in the following example.
+
+ 
+Example 1:
+
+Input: 
+Activity table:
++-----------+-----------+------------+--------------+
+| player_id | device_id | event_date | games_played |
++-----------+-----------+------------+--------------+
+| 1         | 2         | 2016-03-01 | 5            |
+| 1         | 2         | 2016-03-02 | 6            |
+| 2         | 3         | 2017-06-25 | 1            |
+| 3         | 1         | 2016-03-01 | 0            |
+| 3         | 4         | 2016-07-03 | 5            |
++-----------+-----------+------------+--------------+
+Output: 
++------------+----------+----------------+
+| install_dt | installs | Day1_retention |
++------------+----------+----------------+
+| 2016-03-01 | 2        | 0.50           |
+| 2017-06-25 | 1        | 0.00           |
++------------+----------+----------------+
+*/
+
+with installs as (
+    select 
+        player_id,
+        min(event_date) as install_dt
+    from activity 
+    group by player_id
+)
+
+, next_day_logins as (
+    select 
+        a.player_id,
+        a.event_date
+    from activity as a
+    join installs as i on a.player_id = i.player_id
+    where a.event_date = install_dt + interval '1 day'
+)
+
+select 
+    i.install_dt,
+    count(distinct i.player_id) as installs,
+    round(1.0 * count(distinct l.player_id) / count(distinct i.player_id), 2) as Day1_retention
+from installs as i 
+left join next_day_logins as l on l.event_date = i.install_dt + interval '1 day'
+group by i.install_dt
